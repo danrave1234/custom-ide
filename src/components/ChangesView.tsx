@@ -74,6 +74,7 @@ export default function ChangesView({ repoPath, onError, onRepoChanged }: Props)
     }
   };
 
+  const canCommit = !busy && staged.length > 0 && message.trim().length > 0;
   const doCommit = () =>
     act(async () => {
       await api.commit(repoPath, message.trim());
@@ -90,6 +91,15 @@ export default function ChangesView({ repoPath, onError, onRepoChanged }: Props)
         key={`${isStaged ? "s" : "u"}-${file.path}`}
         className={`file-row ${isSelected ? "selected" : ""}`}
         onClick={() => setSelected({ file, staged: isStaged })}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            setSelected({ file, staged: isStaged });
+          }
+        }}
+        tabIndex={0}
+        role="option"
+        aria-selected={isSelected}
       >
         <span className={`file-status file-status-${statusLabel(code)}`}>{statusLabel(code)}</span>
         <span className="file-path" title={file.path}>
@@ -157,12 +167,20 @@ export default function ChangesView({ repoPath, onError, onRepoChanged }: Props)
             placeholder="Commit message"
             value={message}
             onChange={(e) => setMessage(e.target.value)}
+            onKeyDown={(e) => {
+              if ((e.ctrlKey || e.metaKey) && e.key === "Enter" && canCommit) {
+                e.preventDefault();
+                doCommit();
+              }
+            }}
             rows={3}
+            aria-label="Commit message"
           />
           <button
             className="primary-btn"
-            disabled={busy || staged.length === 0 || !message.trim()}
+            disabled={!canCommit}
             onClick={doCommit}
+            title="Commit staged files (Ctrl+Enter)"
           >
             Commit {staged.length > 0 ? `${staged.length} file${staged.length > 1 ? "s" : ""}` : ""}
           </button>

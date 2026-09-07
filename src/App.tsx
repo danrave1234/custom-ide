@@ -24,6 +24,7 @@ import EnvView from "./components/EnvView";
 import OutputDrawer from "./components/OutputDrawer";
 import KillPortModal from "./components/KillPortModal";
 import TerminalDrawer from "./components/TerminalDrawer";
+import CommandPalette, { type CommandItem } from "./components/CommandPalette";
 import { useResizable } from "./useResizable";
 import "./App.css";
 
@@ -60,15 +61,25 @@ export default function App() {
   const [killPortOpen, setKillPortOpen] = useState(false);
   const [lastSaved, setLastSaved] = useState<string | null>(null);
   const [terminalOpen, setTerminalOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
 
   const toggleTerminal = () => setTerminalOpen((v) => !v);
 
-  // Ctrl+` toggles the terminal, like VS Code
+  // Global navigation shortcuts
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setPaletteOpen(true);
+      }
       if (e.ctrlKey && e.key === "`") {
         e.preventDefault();
         setTerminalOpen((v) => !v);
+      }
+      if (e.key === "Escape") {
+        setPaletteOpen(false);
+        setMoreOpen(false);
       }
     };
     window.addEventListener("keydown", onKey);
@@ -548,6 +559,74 @@ export default function App() {
 
   const repoSessions = sessions.filter((s) => s.repoPath === selectedRepo);
   const workspaceName = root ? root.split(/[\\/]/).filter(Boolean).pop() : null;
+  const commandItems: CommandItem[] = root
+    ? [
+        ...repos.map((repo) => ({
+          id: `repo-${repo.path}`,
+          label: repo.name,
+          detail: `${repo.branch} · ${repo.path}`,
+          group: "Repository",
+          keywords: "open switch",
+          action: () => {
+            setSelectedRepo(repo.path);
+            setView("repo");
+            setSidebarOpen(true);
+          },
+        })),
+        {
+          id: "view-favorites",
+          label: "Open Favorites",
+          detail: `${totalFavorites} pinned run configurations`,
+          group: "Navigate",
+          action: () => setView("favorites"),
+        },
+        {
+          id: "view-sync",
+          label: "Open Sync repos",
+          detail: "Fetch, rebase, and push repositories",
+          group: "Navigate",
+          action: () => setView("sync"),
+        },
+        ...(["changes", "branches", "history", "run", "env"] as Tab[]).map((targetTab) => ({
+          id: `tab-${targetTab}`,
+          label: `Open ${targetTab}`,
+          detail: selectedRepo ? "Current repository" : "Select a repository first",
+          group: "Navigate",
+          action: () => {
+            if (selectedRepo) {
+              setView("repo");
+              setTab(targetTab);
+            }
+          },
+        })),
+        {
+          id: "action-terminal",
+          label: terminalOpen ? "Hide terminal" : "Show terminal",
+          detail: "Ctrl+`",
+          group: "Action",
+          action: toggleTerminal,
+        },
+        {
+          id: "action-rescan",
+          label: "Rescan workspace",
+          detail: root,
+          group: "Action",
+          action: () => void openWorkspace(root),
+        },
+        {
+          id: "action-open-folder",
+          label: "Open workspace folder…",
+          group: "Action",
+          action: () => void pickAndOpen(),
+        },
+        {
+          id: "action-kill-port",
+          label: "Kill process on port…",
+          group: "Action",
+          action: () => setKillPortOpen(true),
+        },
+      ]
+    : [];
 
   if (!root) {
     return (
@@ -634,20 +713,17 @@ export default function App() {
             </>
           )}
         </div>
+        <button className="command-trigger" onClick={() => setPaletteOpen(true)}>
+          <span aria-hidden="true">⌕</span>
+          <span>Search commands</span>
+          <kbd>Ctrl K</kbd>
+        </button>
         {totalRunning > 0 && (
           <span className="running-indicator">
             <span className="running-dot" /> {totalRunning} running
           </span>
         )}
         <span className="topbar-spacer" />
-        <span className="build-stamp" title={`VibeDeck ${__APP_VERSION__}, built ${__BUILD_TIME__}`}>
-          v{__APP_VERSION__} · build {__BUILD_TIME__}
-        </span>
-        {lastSaved && (
-          <span className="save-stamp" title="Settings last written to disk">
-            saved {lastSaved}
-          </span>
-        )}
         <button
           className={`mini-btn ${terminalOpen ? "active-btn" : ""}`}
           onClick={toggleTerminal}
@@ -655,13 +731,23 @@ export default function App() {
         >
           &gt;_ Terminal
         </button>
-        <button className="mini-btn" onClick={() => setKillPortOpen(true)}>
-          🔌 Kill port
-        </button>
-        <button className="mini-btn" onClick={pickAndOpen}>
-          Open folder…
-        </button>
+        <div className="more-menu">
+          <button className={`mini-btn more-button ${moreOpen ? "active-btn" : ""}`} onClick={() => setMoreOpen(!moreOpen)} aria-expanded={moreOpen} aria-label="More actions">•••</button>
+          {moreOpen && (
+            <>
+              <div className="ws-backdrop" onClick={() => setMoreOpen(false)} />
+              <div className="more-dropdown">
+                <button onClick={() => { setMoreOpen(false); setKillPortOpen(true); }}>🔌 Kill process on port…</button>
+                <button onClick={() => { setMoreOpen(false); void pickAndOpen(); }}>Open folder…</button>
+                <button onClick={() => { setMoreOpen(false); void api.newWindow().catch((e) => showError(String(e))); }}>New window</button>
+                <div className="ws-divider" />
+                <div className="app-meta">VibeDeck v{__APP_VERSION__}<small>Built {__BUILD_TIME__}{lastSaved ? ` · saved ${lastSaved}` : ""}</small></div>
+              </div>
+            </>
+          )}
+        </div>
       </header>
+      {paletteOpen && <CommandPalette items={commandItems} onClose={() => setPaletteOpen(false)} />}
       {killPortOpen && <KillPortModal onClose={() => setKillPortOpen(false)} />}
 
       {error && (
@@ -735,12 +821,14 @@ export default function App() {
             />
           ) : selectedRepo ? (
             <>
-              <nav className="tabs">
+              <nav className="tabs" role="tablist" aria-label="Repository views">
                 {(["changes", "branches", "history", "run", "env"] as Tab[]).map((t) => (
                   <button
                     key={t}
                     className={`tab ${tab === t ? "active" : ""}`}
                     onClick={() => setTab(t)}
+                    role="tab"
+                    aria-selected={tab === t}
                   >
                     {t === "run" && (runningByRepo[selectedRepo] ?? 0) > 0 ? "run ●" : t}
                   </button>

@@ -6,7 +6,8 @@ Built with **Tauri 2 + React + TypeScript** (uses the OS webview — no bundled 
 
 ## Features
 
-- **Workspace = folder of repos.** Open any folder; every git repository inside (up to 3 levels deep) shows up with its branch, dirty-file count, and ahead/behind markers. Recent-workspace switcher in the top bar; multiple windows for multiple workspaces.
+- **Workspace = folder of repos.** Open any folder; every git repository inside (up to 3 levels deep) shows up with its branch, dirty-file count, and ahead/behind markers. Filter and sort repos in the sidebar. Recent-workspace switcher in the top bar; multiple windows for multiple workspaces.
+- **Keyboard-first** — `Ctrl+K` command palette for repos, views, and actions; Ctrl+backtick toggles the terminal; `Ctrl+Enter` commits; every control is reachable by Tab with visible focus.
 - **Changes / Branches / History** — stage/unstage/discard, colored unified diffs, commit; switch/create/delete branches, fetch/pull/push; commit log with full diffs.
 - **Run** — IntelliJ-style run configs auto-detected from `package.json` scripts (npm/pnpm/yarn/bun, monorepo sub-packages included), Maven, Gradle, Cargo, docker-compose — plus saved custom commands per repo. Searchable and filterable.
 - **Favorites (landing page)** — pin configs from any repo, organize them into icon-labeled groups, drag to reorder, and run a whole group sequentially with a configurable delay between starts. Run all / Stop all.
