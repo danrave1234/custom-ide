@@ -4,6 +4,8 @@ All notable changes to VibeDeck will be documented in this file. The project fol
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-08
+
 ### Added
 
 - Command palette (`Ctrl+K`) for jumping to repositories, views, and actions.
