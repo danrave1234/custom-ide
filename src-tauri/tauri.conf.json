@@ -32,6 +32,18 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDMzNzAzMUMyNDc0RjgxQkIKUldTN2dVOUh3akZ3TTZ2ZG90Wmx0Q3A0VFgwNHlqUnVIaWlFY2JoYmFEYkY4RG0xVE9xWS9iK2oK",
+      "endpoints": [
+        "https://github.com/danrave1234/custom-ide/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

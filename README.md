@@ -50,6 +50,12 @@ To publish a release:
 
 The workflow deliberately rejects a tag whose version does not match the manifests. Current community packages are unsigned, so Windows and macOS may display trust warnings until code-signing certificates are configured.
 
+### In-app updates
+
+Installed copies check for a newer release once, a few seconds after launch (and on demand from **Check for updates** in the command palette or the `•••` menu). There is no background polling. The check downloads `latest.json` from the latest *published* GitHub Release, so drafts and pre-releases are never offered. Clicking **Update and restart** downloads the signed bundle, stops running dev servers and terminals, installs, and relaunches. Windows (NSIS and MSI), macOS, and Linux (AppImage, `.deb`, `.rpm`) are supported; `.deb`/`.rpm` installs ask for an administrator password.
+
+Updates are signed with a separate updater key (not an OS code-signing certificate). The public key lives in `src-tauri/tauri.conf.json`; the private key must be stored as the `TAURI_SIGNING_PRIVATE_KEY` repository secret (plus `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` if it has a password). Keep a backup of the private key: if it is lost, existing installs can no longer verify updates and users must reinstall manually. To build signed installers locally, set `TAURI_SIGNING_PRIVATE_KEY` in your shell before `npm run tauri build`.
+
 See [`ROADMAP.md`](ROADMAP.md) for the prioritized product and engineering improvements still worth tackling.
 
 ## Layout

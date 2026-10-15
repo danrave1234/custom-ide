@@ -4,6 +4,11 @@ All notable changes to VibeDeck will be documented in this file. The project fol
 
 ## [Unreleased]
 
+### Added
+
+- In-app updates: VibeDeck checks for a new release once after launch (no background polling) and can download, install, and restart itself from an update notice. "Check for updates" is available in the command palette and the `•••` menu.
+- Running dev servers and terminals are stopped cleanly before an update installs.
+
 ## [0.4.0] - 2026-10-15
 
 ### Added

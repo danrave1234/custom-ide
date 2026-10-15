@@ -2619,3 +2619,67 @@ body.resizing-y {
 .ansi-bright-magenta { color: #d8b4fe; }
 .ansi-bright-cyan { color: #67e8f9; }
 .ansi-bright-white { color: #f9fafb; }
+
+/* ---------- update notice ---------- */
+
+.update-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--accent-soft);
+  color: var(--text);
+  border-bottom: 1px solid rgba(124, 108, 255, 0.35);
+  padding: 6px 14px;
+  font-size: 12px;
+}
+
+.update-bar > svg {
+  flex-shrink: 0;
+  color: var(--accent);
+}
+
+.update-bar-error {
+  background: rgba(248, 113, 113, 0.12);
+  border-bottom-color: rgba(248, 113, 113, 0.3);
+}
+
+.update-bar-error > svg,
+.update-bar-error .update-message {
+  color: var(--red);
+}
+
+.update-message {
+  flex: 1;
+  min-width: 0;
+  word-break: break-word;
+}
+
+.update-progress {
+  width: 120px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--bg-raised);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.update-progress > span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.2s ease;
+}
+
+.update-btn {
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+.welcome .update-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  border-bottom: none;
+  border-top: 1px solid rgba(124, 108, 255, 0.35);
+}

@@ -24,13 +24,13 @@ import EnvView from "./components/EnvView";
 import BottomPanel from "./components/BottomPanel";
 import KillPortModal from "./components/KillPortModal";
 import CommandPalette, { type CommandItem } from "./components/CommandPalette";
+import UpdateNotice from "./components/UpdateNotice";
 import { Menu, ChevronDown, Close, Folder, Terminal as TerminalIcon } from "./components/Icons";
 import { useResizable } from "./useResizable";
 import { appendRunOutput } from "./outputBuffer";
+import { useUpdater } from "./useUpdater";
 import "./App.css";
 
-declare const __APP_VERSION__: string;
-declare const __BUILD_TIME__: string;
 
 type Tab = "changes" | "branches" | "history" | "run" | "env";
 type View = "repo" | "favorites" | "sync";
@@ -62,6 +62,7 @@ export default function App() {
   const [killPortOpen, setKillPortOpen] = useState(false);
   const [lastSaved, setLastSaved] = useState<string | null>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const updater = useUpdater();
   const [moreOpen, setMoreOpen] = useState(false);
   const [bottomOpen, setBottomOpen] = useState(false);
 
@@ -706,6 +707,14 @@ export default function App() {
           group: "Action",
           action: () => setKillPortOpen(true),
         },
+        {
+          id: "action-check-updates",
+          label: "Check for updates",
+          detail: `Current version v${__APP_VERSION__}`,
+          group: "Action",
+          keywords: "upgrade version release",
+          action: updater.checkNow,
+        },
       ]
     : [];
 
@@ -728,6 +737,7 @@ export default function App() {
           </div>
         )}
         {error && <div className="error-bar">{error}</div>}
+        <UpdateNotice updater={updater} runningCount={totalRunning} />
       </div>
     );
   }
@@ -826,6 +836,7 @@ export default function App() {
                 <button onClick={() => { setMoreOpen(false); setKillPortOpen(true); }}>Kill process on port…</button>
                 <button onClick={() => { setMoreOpen(false); void pickAndOpen(); }}>Open folder…</button>
                 <button onClick={() => { setMoreOpen(false); void api.newWindow().catch((e) => showError(String(e))); }}>New window</button>
+                <button onClick={() => { setMoreOpen(false); updater.checkNow(); }}>Check for updates…</button>
                 <div className="ws-divider" />
                 <div className="app-meta">VibeDeck v{__APP_VERSION__}<small>Built {__BUILD_TIME__}{lastSaved ? ` · saved ${lastSaved}` : ""}</small></div>
               </div>
@@ -835,6 +846,7 @@ export default function App() {
       </header>
       {paletteOpen && <CommandPalette items={commandItems} onClose={() => setPaletteOpen(false)} />}
       {killPortOpen && <KillPortModal onClose={() => setKillPortOpen(false)} />}
+      <UpdateNotice updater={updater} runningCount={totalRunning} />
 
       {error && (
         <div className="error-bar">
