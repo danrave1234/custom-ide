@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Search } from "./Icons";
 
 export interface CommandItem {
   id: string;
@@ -53,7 +54,7 @@ export default function CommandPalette({ items, onClose }: Props) {
         onMouseDown={(event) => event.stopPropagation()}
       >
         <div className="palette-search-row">
-          <span className="palette-search-icon" aria-hidden="true">⌕</span>
+          <Search size={14} />
           <input
             ref={inputRef}
             value={query}

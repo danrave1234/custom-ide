@@ -15,9 +15,15 @@ const BATCH_MAX_AGE: Duration = Duration::from_millis(80);
 const WATCH_SCAN_INTERVAL: Duration = Duration::from_millis(350);
 const WATCH_DEBOUNCE: Duration = Duration::from_millis(500);
 const IGNORED_WATCH_DIRECTORIES: &[&str] = &[
+    ".cache",
     ".git",
     ".next",
     ".nuxt",
+    ".open-next",
+    ".svelte-kit",
+    ".turbo",
+    ".vercel",
+    ".wrangler",
     "build",
     "coverage",
     "dist",
@@ -33,7 +39,7 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 #[derive(Default)]
 pub struct ProcessManager {
-    running: Mutex<HashMap<String, u32>>,
+    pub running: Mutex<HashMap<String, u32>>,
 }
 
 impl ProcessManager {
@@ -102,6 +108,100 @@ fn snapshot_tree(root: &Path) -> ChangeSnapshot {
     let mut files = HashMap::new();
     visit(root, &mut files);
     ChangeSnapshot(files)
+}
+
+/// Paths that differ between two snapshots: added, removed or modified.
+fn changed_paths(before: &ChangeSnapshot, after: &ChangeSnapshot) -> Vec<PathBuf> {
+    let mut changed: Vec<PathBuf> = after
+        .0
+        .iter()
+        .filter(|(path, stamp)| before.0.get(*path) != Some(*stamp))
+        .map(|(path, _)| path.clone())
+        .collect();
+    changed.extend(
+        before
+            .0
+            .keys()
+            .filter(|path| !after.0.contains_key(*path))
+            .cloned(),
+    );
+    changed
+}
+
+/// The subset of `paths` that git ignores (per the repo's .gitignore files).
+/// Build output, logs, caches and tool state usually live there, and changes
+/// to them should never restart a dev server. Outside a git repo, or if git is
+/// unavailable, nothing is treated as ignored.
+fn git_ignored(root: &Path, paths: &[PathBuf]) -> HashSet<PathBuf> {
+    use std::io::Write;
+    if paths.is_empty() {
+        return HashSet::new();
+    }
+    // fs::canonicalize gives `\\?\C:\...` on Windows, which git does not
+    // accept; hand git a plain root and root-relative, slash-separated paths.
+    let plain_root = PathBuf::from(
+        root.to_string_lossy()
+            .trim_start_matches(r"\\?\")
+            .to_string(),
+    );
+    let relative: Vec<(String, PathBuf)> = paths
+        .iter()
+        .filter_map(|path| {
+            path.strip_prefix(root)
+                .ok()
+                .map(|rel| (rel.to_string_lossy().replace('\\', "/"), path.clone()))
+        })
+        .collect();
+    if relative.is_empty() {
+        return HashSet::new();
+    }
+    let mut command = Command::new("git");
+    command
+        .arg("-C")
+        .arg(&plain_root)
+        .args(["check-ignore", "--stdin", "-z"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    #[cfg(windows)]
+    command.creation_flags(CREATE_NO_WINDOW);
+    let Ok(mut child) = command.spawn() else {
+        return HashSet::new();
+    };
+    if let Some(mut stdin) = child.stdin.take() {
+        let mut input = Vec::new();
+        for (rel, _) in &relative {
+            input.extend_from_slice(rel.as_bytes());
+            input.push(0);
+        }
+        let _ = stdin.write_all(&input);
+    }
+    let Ok(output) = child.wait_with_output() else {
+        return HashSet::new();
+    };
+    let ignored: HashSet<String> = output
+        .stdout
+        .split(|byte| *byte == 0)
+        .filter(|chunk| !chunk.is_empty())
+        .map(|chunk| String::from_utf8_lossy(chunk).into_owned())
+        .collect();
+    relative
+        .into_iter()
+        .filter(|(rel, _)| ignored.contains(rel))
+        .map(|(_, path)| path)
+        .collect()
+}
+
+/// Whether the settled tree differs from the last baseline in a way that
+/// should restart: something actually changed (a temp file that appeared and
+/// vanished again does not count) and not every change is git-ignored.
+fn should_restart(root: &Path, baseline: &ChangeSnapshot, settled: &ChangeSnapshot) -> bool {
+    let changed = changed_paths(baseline, settled);
+    if changed.is_empty() {
+        return false;
+    }
+    let ignored = git_ignored(root, &changed);
+    changed.iter().any(|path| !ignored.contains(path))
 }
 
 struct WatchHandle {
@@ -190,6 +290,10 @@ pub fn watch_run_changes(
 
     std::thread::spawn(move || {
         let mut snapshot = snapshot_tree(&root);
+        // State as of the last restart (or watch start). Restarts are decided
+        // against this, not against the previous scan, so churn that settles
+        // back to the same tree (temp files) is not a change.
+        let mut baseline = snapshot_tree(&root);
         let mut changed_at: Option<Instant> = None;
         while !stop.load(Ordering::Relaxed) {
             std::thread::sleep(WATCH_SCAN_INTERVAL);
@@ -200,9 +304,13 @@ pub fn watch_run_changes(
                 continue;
             }
             if changed_at.is_some_and(|at| at.elapsed() >= WATCH_DEBOUNCE) {
-                let ids = session_ids.lock().unwrap().iter().cloned().collect();
-                let _ = app.emit("run-change", RunChangeEvent { ids });
                 changed_at = None;
+                if should_restart(&root, &baseline, &snapshot) {
+                    let ids = session_ids.lock().unwrap().iter().cloned().collect();
+                    let _ = app.emit("run-change", RunChangeEvent { ids });
+                }
+                baseline = snapshot_tree(&root);
+                snapshot = snapshot_tree(&root);
             }
         }
     });
@@ -443,6 +551,16 @@ fn spawn_batcher(app: AppHandle, id: String, rx: mpsc::Receiver<(&'static str, S
             if batch.is_empty() {
                 return;
             }
+            // Record lines in the agent output buffer (if available)
+            if let Some(agent) = app.try_state::<Arc<super::agent::AgentState>>() {
+                for line in batch.iter() {
+                    let prefixed = match line.stream {
+                        "stderr" => format!("[stderr] {}", line.line),
+                        _ => line.line.clone(),
+                    };
+                    agent.record_output(&id, prefixed);
+                }
+            }
             let lines = std::mem::take(batch);
             let _ = app.emit(
                 "run-output",
@@ -522,6 +640,11 @@ pub fn start_run(
     let pid = child.id();
     state.running.lock().unwrap().insert(id.clone(), pid);
 
+    // Clear agent output buffer for this session id
+    if let Some(agent) = app.try_state::<Arc<super::agent::AgentState>>() {
+        agent.clear_output(&id);
+    }
+
     let (tx, rx) = mpsc::channel();
     if let Some(stdout) = child.stdout.take() {
         spawn_reader(tx.clone(), "stdout", stdout);
@@ -589,7 +712,7 @@ pub fn list_running(state: State<'_, ProcessManager>) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{snapshot_tree, ChangeSnapshot};
+    use super::{changed_paths, should_restart, snapshot_tree, ChangeSnapshot};
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -631,6 +754,59 @@ mod tests {
         }
 
         assert_eq!(before, snapshot_tree(&root));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn transient_files_that_vanish_do_not_count_as_changes() {
+        let root = temp_dir();
+        fs::write(root.join("app.ts"), "source").unwrap();
+        let baseline = snapshot_tree(&root);
+
+        let temp = root.join("_tmp_1234_abcd");
+        fs::write(&temp, "x").unwrap();
+        assert_ne!(baseline, snapshot_tree(&root));
+        fs::remove_file(&temp).unwrap();
+
+        let settled = snapshot_tree(&root);
+        assert!(changed_paths(&baseline, &settled).is_empty());
+        assert!(!should_restart(&root, &baseline, &settled));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn real_edits_still_restart() {
+        let root = temp_dir();
+        let source = root.join("main.ts");
+        fs::write(&source, "first").unwrap();
+        let baseline = snapshot_tree(&root);
+        fs::write(&source, "second version").unwrap();
+        assert!(should_restart(&root, &baseline, &snapshot_tree(&root)));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn git_ignored_changes_do_not_restart() {
+        let root = temp_dir();
+        let git = std::process::Command::new("git")
+            .arg("-C")
+            .arg(&root)
+            .args(["init", "-q"])
+            .status();
+        if !git.map(|s| s.success()).unwrap_or(false) {
+            fs::remove_dir_all(root).unwrap();
+            return; // git not available in this environment
+        }
+        fs::write(root.join(".gitignore"), "*.log\nstate/\n").unwrap();
+        fs::create_dir_all(root.join("state")).unwrap();
+        let baseline = snapshot_tree(&root);
+
+        fs::write(root.join("server.log"), "line").unwrap();
+        fs::write(root.join("state").join("cache.sqlite"), "db").unwrap();
+        assert!(!should_restart(&root, &baseline, &snapshot_tree(&root)));
+
+        fs::write(root.join("app.ts"), "code").unwrap();
+        assert!(should_restart(&root, &baseline, &snapshot_tree(&root)));
         fs::remove_dir_all(root).unwrap();
     }
 

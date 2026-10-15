@@ -61,7 +61,7 @@ export default function FreePortButton({ session, onRestart, onError }: Props) {
       title={`Kill whatever is on port ${port}, then restart this run`}
       onClick={freeAndRestart}
     >
-      {busy ? "⏳…" : `🔌 Free port ${port} & restart`}
+      {busy ? "…" : `Free port ${port} & restart`}
     </button>
   );
 }

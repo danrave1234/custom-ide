@@ -2,14 +2,16 @@ import { useCallback, useEffect, useState } from "react";
 import * as api from "../api";
 import { confirmAsk } from "../api";
 import type { Branches } from "../types";
+import { Close, ChevronRight, ChevronDown } from "./Icons";
 
 interface Props {
   repoPath: string;
   onError: (msg: string) => void;
+  onSuccess?: () => void;
   onRepoChanged: () => void;
 }
 
-export default function BranchesView({ repoPath, onError, onRepoChanged }: Props) {
+export default function BranchesView({ repoPath, onError, onSuccess, onRepoChanged }: Props) {
   const [branches, setBranches] = useState<Branches | null>(null);
   const [newBranch, setNewBranch] = useState("");
   const [busy, setBusy] = useState(false);
@@ -19,10 +21,11 @@ export default function BranchesView({ repoPath, onError, onRepoChanged }: Props
   const refresh = useCallback(async () => {
     try {
       setBranches(await api.listBranches(repoPath));
+      onSuccess?.();
     } catch (e) {
       onError(String(e));
     }
-  }, [repoPath, onError]);
+  }, [repoPath, onError, onSuccess]);
 
   useEffect(() => {
     setSyncMsg("");
@@ -87,7 +90,7 @@ export default function BranchesView({ repoPath, onError, onRepoChanged }: Props
           <li key={b.name} className={`branch-row ${b.is_current ? "current" : ""}`}>
             <div className="branch-main">
               <span className="branch-name">
-                {b.is_current ? "● " : ""}
+                {b.is_current ? "" : ""}
                 {b.name}
               </span>
               {b.upstream && <span className="branch-upstream">→ {b.upstream}</span>}
@@ -111,7 +114,7 @@ export default function BranchesView({ repoPath, onError, onRepoChanged }: Props
                       }
                     }}
                   >
-                    ✕
+                    <Close size={12} />
                   </button>
                 </>
               )}
@@ -122,7 +125,7 @@ export default function BranchesView({ repoPath, onError, onRepoChanged }: Props
 
       <div className="section-header remotes-toggle" onClick={() => setShowRemotes(!showRemotes)}>
         <span>
-          {showRemotes ? "▾" : "▸"} Remote branches ({branches?.remotes.length ?? 0})
+          {showRemotes ? <ChevronDown size={10} /> : <ChevronRight size={10} />} Remote branches ({branches?.remotes.length ?? 0})
         </span>
       </div>
       {showRemotes && (

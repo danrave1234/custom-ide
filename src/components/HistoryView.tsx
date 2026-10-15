@@ -7,9 +7,10 @@ import { useResizable } from "../useResizable";
 interface Props {
   repoPath: string;
   onError: (msg: string) => void;
+  onSuccess?: () => void;
 }
 
-export default function HistoryView({ repoPath, onError }: Props) {
+export default function HistoryView({ repoPath, onError, onSuccess }: Props) {
   const [commits, setCommits] = useState<CommitEntry[]>([]);
   const [selected, setSelected] = useState<CommitEntry | null>(null);
   const [patch, setPatch] = useState("");
@@ -19,10 +20,11 @@ export default function HistoryView({ repoPath, onError }: Props) {
   const refresh = useCallback(async () => {
     try {
       setCommits(await api.commitLog(repoPath, limit));
+      onSuccess?.();
     } catch (e) {
       onError(String(e));
     }
-  }, [repoPath, limit, onError]);
+  }, [repoPath, limit, onError, onSuccess]);
 
   useEffect(() => {
     setSelected(null);

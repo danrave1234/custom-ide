@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import * as api from "../api";
 import type { RepoInfo, RunSession, SyncPrefs } from "../types";
-import OutputPane from "./OutputPane";
-import CopyButton from "./CopyButton";
+import SessionOutput from "./SessionOutput";
 import { useResizable } from "../useResizable";
+import { Sync, Play, Stop as StopIcon } from "./Icons";
 
 // shared branches your team says must never be force-pushed
 const PROTECTED_BRANCHES = [
@@ -128,24 +128,19 @@ export default function SyncView({
     }
   };
 
-  const active =
-    syncSessions.find((s) => s.id === activeSessionId) ?? syncSessions[0] ?? null;
-  const repoLabel = (path: string) =>
-    repos.find((r) => r.path === path)?.name ?? path.split(/[\\/]/).filter(Boolean).pop() ?? path;
-
   const runningCount = runningIds.size;
 
   return (
     <div className="run-view">
       <div className="run-configs" style={{ width: panelWidth, minWidth: panelWidth }}>
         <div className="favorites-header">
-          <span className="favorites-title">⇅ Sync repos</span>
+          <span className="favorites-title"><Sync size={14} /> Sync repos</span>
           <button
             className="mini-btn run"
             disabled={selectedRepos.length === 0 || !branch || runningCount > 0}
             onClick={runSync}
           >
-            {runningCount > 0 ? `⏳ Syncing (${runningCount})…` : `▶ Update ${selectedRepos.length || ""} repo(s)`}
+            {runningCount > 0 ? `Syncing (${runningCount})…` : <><Play size={10} /> Update {selectedRepos.length || ""} repo(s)</>}
           </button>
         </div>
 
@@ -238,7 +233,7 @@ export default function SyncView({
                       )}
                     </span>
                     <span className="config-command">
-                      ⎇ {r.branch}
+                      {r.branch}
                       {r.behind > 0 ? ` · ↓${r.behind} behind` : ""}
                       {r.ahead > 0 ? ` · ↑${r.ahead} ahead` : ""}
                     </span>
@@ -260,7 +255,7 @@ export default function SyncView({
                   )}
                   {isRunning ? (
                     <button className="mini-btn danger" onClick={() => onStop(id)}>
-                      ■
+                      <StopIcon size={10} />
                     </button>
                   ) : session ? (
                     <span
@@ -278,45 +273,18 @@ export default function SyncView({
       </div>
       <div className="resizer" onMouseDown={onPanelResize} />
 
-      <div className="run-output">
-        <div className="session-tabs">
-          {syncSessions.map((s) => (
-            <button
-              key={s.id}
-              className={`session-tab ${active?.id === s.id ? "active" : ""} status-${s.status}`}
-              onClick={() => onSelectSession(s.id)}
-            >
-              <span className={`status-dot status-${s.status}`} />
-              {repoLabel(s.repoPath)}
-              {s.status === "exited" && s.exitCode !== null && s.exitCode !== 0 && ` (${s.exitCode})`}
-            </button>
-          ))}
-          {syncSessions.length === 0 && (
-            <span className="config-hint">
-              Pick repos, choose the base branch, hit Update — each repo's progress streams here.
-            </span>
-          )}
-        </div>
-        {active && (
-          <>
-            <div className="session-toolbar">
-              <span className="session-command">{active.command}</span>
-              <span className="session-actions">
-                {active.status === "running" && (
-                  <button className="mini-btn danger" onClick={() => onStop(active.id)}>
-                    ■ Stop
-                  </button>
-                )}
-                <CopyButton getText={() => active.lines.map((l) => l.text).join("\n")} />
-                <button className="mini-btn" onClick={() => onClear(active.id)}>
-                  Clear
-                </button>
-              </span>
-            </div>
-            <OutputPane session={active} />
-          </>
-        )}
-      </div>
+      <SessionOutput
+        sessions={syncSessions}
+        activeSessionId={activeSessionId}
+        repos={repos}
+        onSelectSession={onSelectSession}
+        onStop={onStop}
+        onClear={onClear}
+        onError={onError}
+        showRestart={false}
+        showFreePort={false}
+        emptyHint="Pick repos, choose the base branch, hit Update — each repo's progress streams here."
+      />
     </div>
   );
 }

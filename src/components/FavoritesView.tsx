@@ -1,12 +1,11 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { confirmAsk } from "../api";
 import type { CustomConfig, GroupItem, RepoInfo, RunGroup, RunSession } from "../types";
-import OutputPane from "./OutputPane";
-import CopyButton from "./CopyButton";
-import FreePortButton from "./FreePortButton";
+import SessionOutput from "./SessionOutput";
 import { useResizable } from "../useResizable";
+import { Star, Play, Stop as StopIcon, MoreVertical, Clock, Palette, Edit, Trash, ChevronRight, ChevronDown, Plus } from "./Icons";
 
-const GROUP_ICONS = ["📁", "🚀", "🔥", "⚙️", "🧩", "🖥️", "🌐", "📦", "🗄️", "🎨", "📱", "🤖", "⚡", "🛠️"];
+const GROUP_ICONS = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N"];
 
 interface Props {
   repos: RepoInfo[];
@@ -23,6 +22,7 @@ interface Props {
   onError: (msg: string) => void;
   onAddGroup: (name: string) => void;
   onRemoveGroup: (name: string) => void;
+  onRenameGroup: (oldName: string, newName: string) => void;
   onAddToGroup: (groupName: string, item: GroupItem) => void;
   onRemoveFromGroup: (groupName: string, itemKey: string) => void;
   onMoveInGroup: (groupName: string, itemKey: string, delta: -1 | 1) => void;
@@ -49,6 +49,7 @@ export default function FavoritesView({
   onError,
   onAddGroup,
   onRemoveGroup,
+  onRenameGroup,
   onAddToGroup,
   onRemoveFromGroup,
   onMoveInGroup,
@@ -74,6 +75,29 @@ export default function FavoritesView({
   const [showAllFavorites, setShowAllFavorites] = useState(
     () => localStorage.getItem("vd-show-all-favs") === "1"
   );
+  // Drag-and-drop for individual favorites into groups
+  const [draggingFavorite, setDraggingFavorite] = useState<GroupItem | null>(null);
+  const [dragOverGroupForItem, setDragOverGroupForItem] = useState<string | null>(null);
+  // Multi-select for bulk operations
+  const [selectedFavorites, setSelectedFavorites] = useState<Set<string>>(new Set());
+  // Overflow menu state per group
+  const [groupMenuFor, setGroupMenuFor] = useState<string | null>(null);
+  const groupMenuBtnRef = useRef<HTMLButtonElement | null>(null);
+  const [groupMenuRect, setGroupMenuRect] = useState<{ top: number; right: number } | null>(null);
+  const [addPanelGroup, setAddPanelGroup] = useState<string | null>(null);
+  // Inline rename state
+  const [renamingGroup, setRenamingGroup] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+
+  // Position group menu at button rect when opened
+  useEffect(() => {
+    if (groupMenuFor && groupMenuBtnRef.current) {
+      const rect = groupMenuBtnRef.current.getBoundingClientRect();
+      setGroupMenuRect({ top: rect.bottom + 6, right: window.innerWidth - rect.right });
+    } else {
+      setGroupMenuRect(null);
+    }
+  }, [groupMenuFor]);
 
   const setExpandedPersist = (updater: (prev: Set<string>) => Set<string>) => {
     setExpanded((prev) => {
@@ -115,6 +139,59 @@ export default function FavoritesView({
   );
   const idleFavorites = allFavorites.filter((f) => !runningIds.has(idFor(f.repoPath, f.name)));
 
+  // Bulk selection helpers
+  const toggleFavoriteSelection = (item: GroupItem) => {
+    const key = idFor(item.repoPath, item.name);
+    setSelectedFavorites((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  const clearSelection = () => setSelectedFavorites(new Set());
+
+  // Add selected favorites to a group
+  const addSelectedToGroup = (groupName: string) => {
+    for (const key of selectedFavorites) {
+      const item = allFavorites.find((f) => idFor(f.repoPath, f.name) === key);
+      if (item) onAddToGroup(groupName, item);
+    }
+    clearSelection();
+  };
+
+  // Create a new group from selected favorites
+  const createGroupFromSelected = () => {
+    if (selectedFavorites.size === 0) return;
+    const name = `Group ${groups.length + 1}`;
+    onAddGroup(name);
+    setExpanded((prev) => new Set(prev).add(name));
+    addSelectedToGroup(name);
+  };
+
+  // Drag favorite into group handler
+  const handleDropFavoriteOnGroup = (item: GroupItem, groupName: string) => {
+    onAddToGroup(groupName, item);
+    setDraggingFavorite(null);
+    setDragOverGroupForItem(null);
+  };
+
+  // Inline rename handler
+  const startRename = (groupName: string) => {
+    setRenamingGroup(groupName);
+    setRenameValue(groupName);
+  };
+
+  const commitRename = (oldName: string) => {
+    const newName = renameValue.trim();
+    if (newName && newName !== oldName) {
+      onRenameGroup(oldName, newName);
+    }
+    setRenamingGroup(null);
+    setRenameValue("");
+  };
+
   const runItems = (items: GroupItem[]) => {
     for (const item of items) {
       if (!runningIds.has(idFor(item.repoPath, item.name))) {
@@ -148,16 +225,16 @@ export default function FavoritesView({
     }
   };
 
-  const active = sessions.find((s) => s.id === activeSessionId) ?? sessions[0] ?? null;
-
   const itemRow = (
     item: GroupItem,
     opts: { group?: string; pinStar?: boolean; index?: number; count?: number }
   ) => {
     const id = idFor(item.repoPath, item.name);
     const isRunning = runningIds.has(id);
+    const isSelected = selectedFavorites.has(id);
+    const isInGroup = opts.group ? groups.find((g) => g.name === opts.group)?.items.some((i) => itemKey(i) === id) ?? false : false;
     return (
-      <li className="config-row" key={`${opts.group ?? "fav"}-${id}`}>
+      <li className={`config-row ${isSelected ? "selected-row" : ""}`} key={`${opts.group ?? "fav"}-${id}`}>
         {opts.group && (
           <span className="order-controls">
             <span className="order-no">{(opts.index ?? 0) + 1}</span>
@@ -167,7 +244,7 @@ export default function FavoritesView({
               disabled={opts.index === 0}
               onClick={() => onMoveInGroup(opts.group!, id, -1)}
             >
-              ▲
+              <ChevronRight size={10} />
             </button>
             <button
               className="icon-btn order-btn"
@@ -175,20 +252,32 @@ export default function FavoritesView({
               disabled={opts.index === (opts.count ?? 1) - 1}
               onClick={() => onMoveInGroup(opts.group!, id, 1)}
             >
-              ▼
+              <ChevronDown size={10} />
             </button>
           </span>
         )}
         {opts.pinStar && (
           <button
-            className="icon-btn pin-btn pinned"
-            title="Unpin"
-            onClick={() => onTogglePin(item.repoPath, item)}
+            type="button"
+            className={`icon-btn check-btn ${isSelected ? "checked" : ""}`}
+            title="Select for bulk operations"
+            onClick={() => toggleFavoriteSelection(item)}
           >
-            ★
+            {isSelected ? "✓" : ""}
           </button>
         )}
-        <div className="config-info" title={`${item.command}  (${item.cwd})`}>
+        <div
+          className="config-info"
+          title={`${item.command}  (${item.cwd})`}
+          draggable={opts.pinStar}
+          onDragStart={(e) => {
+            if (opts.pinStar) {
+              setDraggingFavorite(item);
+              e.dataTransfer.effectAllowed = "copy";
+            }
+          }}
+          onDragEnd={() => setDraggingFavorite(null)}
+        >
           <span className="config-name">
             {opts.group && <span className="config-repo">{repoLabel(item.repoPath)} / </span>}
             {item.name}
@@ -196,7 +285,16 @@ export default function FavoritesView({
           <span className="config-command">{item.command}</span>
         </div>
         <div className="config-actions">
-          {opts.pinStar && groups.length > 0 && (
+          {opts.pinStar && (
+            <button
+              className="icon-btn unpin-btn"
+              title="Unpin"
+              onClick={() => onTogglePin(item.repoPath, item)}
+            >
+              <Star size={12} filled />
+            </button>
+          )}
+          {opts.pinStar && groups.length > 0 && !isInGroup && (
             <select
               className="group-select"
               value=""
@@ -205,7 +303,7 @@ export default function FavoritesView({
                 if (e.target.value) onAddToGroup(e.target.value, item);
               }}
             >
-              <option value="">+▾</option>
+              <option value="">+ Add to…</option>
               {groups.map((g) => (
                 <option key={g.name} value={g.name}>
                   {g.name}
@@ -215,27 +313,23 @@ export default function FavoritesView({
           )}
           {isRunning ? (
             <button className="mini-btn danger" onClick={() => onStop(id)}>
-              ■ Stop
+              <StopIcon size={10} /> Stop
             </button>
           ) : (
             <button
               className="mini-btn run"
               onClick={() => onStart(item.repoPath, item.name, item.command, item.cwd)}
             >
-              ▶ Run
+              <Play size={10} /> Run
             </button>
           )}
           {opts.group && (
             <button
               className="icon-btn danger"
               title="Remove from group"
-              onClick={async () => {
-                if (await confirmAsk(`Remove "${item.name}" from group "${opts.group}"? It stays pinned in favorites.`)) {
-                  onRemoveFromGroup(opts.group!, id);
-                }
-              }}
+              onClick={() => onRemoveFromGroup(opts.group!, id)}
             >
-              ✕
+              <Trash size={10} />
             </button>
           )}
         </div>
@@ -243,21 +337,54 @@ export default function FavoritesView({
     );
   };
 
+  const itemKey = (i: GroupItem) => `${i.repoPath}::${i.name}`;
+
   const runningSessions = sessions.filter((s) => s.status === "running");
 
   return (
     <div className="run-view">
       <div className="run-configs" style={{ width: panelWidth, minWidth: panelWidth }}>
         <div className="favorites-header">
-          <span className="favorites-title">★ Favorites ({total})</span>
+          <span className="favorites-title">Favorites ({total})</span>
           <span className="group-actions">
+            {selectedFavorites.size > 0 && (
+              <>
+                <span className="selection-count">{selectedFavorites.size} selected</span>
+                <button
+                  className="mini-btn"
+                  onClick={clearSelection}
+                >
+                  Clear
+                </button>
+                {groups.length > 0 && (
+                  <select
+                    className="group-select"
+                    value=""
+                    title="Add selected to group"
+                    onChange={(e) => {
+                      if (e.target.value) addSelectedToGroup(e.target.value);
+                    }}
+                  >
+                    <option value="">+ Add to…</option>
+                    {groups.map((g) => (
+                      <option key={g.name} value={g.name}>
+                        {g.name}
+                      </option>
+                    ))}
+                  </select>
+                )}
+                <button className="mini-btn" onClick={createGroupFromSelected}>
+                  New group
+                </button>
+              </>
+            )}
             {runningSessions.length > 0 && (
               <button
                 className="mini-btn danger"
                 title="Stop every running process"
                 onClick={() => runningSessions.forEach((s) => onStop(s.id))}
               >
-                ■ Stop all ({runningSessions.length})
+                <StopIcon size={10} /> Stop all ({runningSessions.length})
               </button>
             )}
             <button
@@ -265,7 +392,7 @@ export default function FavoritesView({
               disabled={idleFavorites.length === 0}
               onClick={() => runItems(allFavorites)}
             >
-              ▶ Run all
+              <Play size={10} /> Run all
               {idleFavorites.length > 0 && idleFavorites.length < total
                 ? ` (${idleFavorites.length})`
                 : ""}
@@ -276,7 +403,7 @@ export default function FavoritesView({
         <div className="section-header">
           <span>Groups</span>
           <button className="mini-btn" onClick={() => setShowNewGroup(!showNewGroup)}>
-            {showNewGroup ? "Cancel" : "+ New group"}
+            {showNewGroup ? "Cancel" : <><Plus size={12} /> New group</>}
           </button>
         </div>
         {showNewGroup && (
@@ -306,7 +433,7 @@ export default function FavoritesView({
         )}
         {groups.length === 0 && !showNewGroup && (
           <div className="config-hint">
-            Create a group (backends, apps, …), then use the +▾ on any favorite to add it. Run the
+            Create a group (backends, apps, …), then use the "+ Add to…" dropdown on any favorite to add it. Run the
             whole group with one click.
           </div>
         )}
@@ -315,20 +442,34 @@ export default function FavoritesView({
           const isStarting = startingGroup === g.name;
           const isCollapsed = !expanded.has(g.name);
           const delay = g.delaySeconds ?? 3;
+          const isDragOver = dragOverGroupForItem === g.name && draggingFavorite !== null;
           return (
             <div
               key={g.name}
-              className={`group-block ${dragOverGroup === g.name && dragGroup !== g.name ? "drag-over" : ""}`}
+              className={`group-block ${dragOverGroup === g.name && dragGroup !== g.name ? "drag-over" : ""} ${isDragOver ? "drag-over-item" : ""}`}
+              onClick={() => {
+                if (groupMenuFor === g.name) return;
+                if (groupMenuFor && groupMenuFor !== g.name) setGroupMenuFor(null);
+              }}
               onDragOver={(e) => {
                 e.preventDefault();
-                setDragOverGroup(g.name);
+                if (dragGroup) setDragOverGroup(g.name);
+                if (draggingFavorite) setDragOverGroupForItem(g.name);
               }}
-              onDragLeave={() => setDragOverGroup((cur) => (cur === g.name ? null : cur))}
+              onDragLeave={() => {
+                setDragOverGroup((cur) => (cur === g.name ? null : cur));
+                setDragOverGroupForItem((cur) => (cur === g.name ? null : cur));
+              }}
               onDrop={(e) => {
                 e.preventDefault();
-                if (dragGroup) onReorderGroups(dragGroup, g.name);
-                setDragGroup(null);
-                setDragOverGroup(null);
+                if (dragGroup) {
+                  onReorderGroups(dragGroup, g.name);
+                  setDragGroup(null);
+                  setDragOverGroup(null);
+                }
+                if (draggingFavorite) {
+                  handleDropFavoriteOnGroup(draggingFavorite, g.name);
+                }
               }}
             >
               <div
@@ -342,58 +483,106 @@ export default function FavoritesView({
               >
                 <button
                   className="icon-btn group-icon"
-                  title="Change icon"
-                  onClick={() => setIconPickerFor(iconPickerFor === g.name ? null : g.name)}
+                  title={g.icon ?? "A"}
                 >
-                  {g.icon ?? "📁"}
+                  <span className="group-icon-letter">{g.icon ?? "A"}</span>
                 </button>
-                <button
-                  className="group-name"
-                  title={`${g.items.length} config(s), started top to bottom`}
-                  onClick={() => toggleCollapsed(g.name)}
-                >
-                  {isCollapsed ? "▸" : "▾"} {g.name} ({g.items.length})
-                  {isCollapsed && runningCount > 0 && <span className="running-dot" />}
-                </button>
-                <span className="group-actions">
-                  <label className="delay-label" title="Seconds to wait between each start">
-                    ⏱
-                    <input
-                      className="delay-input"
-                      type="number"
-                      min={0}
-                      max={600}
-                      value={delay}
-                      onChange={(e) =>
-                        onSetGroupDelay(g.name, Math.max(0, Number(e.target.value) || 0))
+                {renamingGroup === g.name ? (
+                  <input
+                    className="rename-input"
+                    value={renameValue}
+                    onChange={(e) => setRenameValue(e.target.value)}
+                    onBlur={() => commitRename(g.name)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") commitRename(g.name);
+                      if (e.key === "Escape") {
+                        setRenamingGroup(null);
+                        setRenameValue("");
                       }
-                    />
-                    s
-                  </label>
+                    }}
+                    autoFocus
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                ) : (
+                  <button
+                    className="group-name"
+                    title={`${g.items.length} config(s), started top to bottom`}
+                    onClick={() => toggleCollapsed(g.name)}
+                    onDoubleClick={() => startRename(g.name)}
+                  >
+                    {isCollapsed ? <ChevronRight size={10} /> : <ChevronDown size={10} />} {g.name} ({g.items.length})
+                    {isCollapsed && runningCount > 0 && <span className="running-dot" />}
+                  </button>
+                )}
+                <span className="group-actions">
                   {runningCount > 0 && (
-                    <button className="mini-btn danger" onClick={() => stopItems(g.items)}>
-                      ■ Stop ({runningCount})
+                    <button className="mini-btn danger" onClick={(e) => { e.stopPropagation(); stopItems(g.items); }}>
+                      <StopIcon size={10} /> Stop ({runningCount})
                     </button>
                   )}
                   <button
                     className="mini-btn run"
                     disabled={isStarting || g.items.length === 0 || runningCount === g.items.length}
-                    onClick={() => runGroupSequential(g.name, g.items, delay)}
+                    onClick={(e) => { e.stopPropagation(); runGroupSequential(g.name, g.items, delay); }}
                     title={`Starts top to bottom, ${delay}s apart`}
                   >
-                    {isStarting ? "⏳ Starting…" : "▶ Run group"}
+                    {isStarting ? "Starting…" : <><Play size={10} /> Run group</>}
                   </button>
-                  <button
-                    className="icon-btn danger"
-                    title="Delete group"
-                    onClick={async () => {
-                      if (await confirmAsk(`Delete group "${g.name}"? Its configs stay pinned in favorites.`)) {
-                        onRemoveGroup(g.name);
-                      }
-                    }}
-                  >
-                    ✕
-                  </button>
+                  <div className="more-menu" onClick={(e) => e.stopPropagation()}>
+                    <button
+                      ref={(el) => { groupMenuBtnRef.current = el; }}
+                      className="icon-btn more-button"
+                      title="More actions"
+                      onClick={() => setGroupMenuFor(groupMenuFor === g.name ? null : g.name)}
+                    >
+                      <MoreVertical size={14} />
+                    </button>
+                    {groupMenuFor === g.name && groupMenuRect && (
+                      <div
+                        className="more-dropdown group-more-dropdown"
+                        style={{
+                          position: "fixed",
+                          top: groupMenuRect.top,
+                          right: groupMenuRect.right,
+                        }}
+                      >
+                        <label className="menu-delay-row" title="Seconds to wait between each start">
+                          <Clock size={12} /> Delay
+                          <input
+                            className="delay-input"
+                            type="number"
+                            min={0}
+                            max={600}
+                            value={delay}
+                            onChange={(e) =>
+                              onSetGroupDelay(g.name, Math.max(0, Number(e.target.value) || 0))
+                            }
+                          />
+                          <span>s</span>
+                        </label>
+                        <button onClick={() => { setIconPickerFor(iconPickerFor === g.name ? null : g.name); setGroupMenuFor(null); }}>
+                          <Palette size={12} /> Change icon
+                        </button>
+                        <button onClick={() => { setAddPanelGroup(g.name); setGroupMenuFor(null); }}>
+                          <Plus size={12} /> Add favorites
+                        </button>
+                        <button onClick={() => { startRename(g.name); setGroupMenuFor(null); }}>
+                          <Edit size={12} /> Rename
+                        </button>
+                        <button
+                          className="danger-item"
+                          onClick={async () => {
+                            setGroupMenuFor(null);
+                            if (await confirmAsk(`Delete group "${g.name}"? Its configs stay pinned in favorites.`)) {
+                              onRemoveGroup(g.name);
+                            }
+                          }}
+                        >
+                          <Trash size={12} /> Delete group
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </span>
               </div>
               {iconPickerFor === g.name && (
@@ -412,9 +601,46 @@ export default function FavoritesView({
                   ))}
                 </div>
               )}
-              {!isCollapsed &&
+              {addPanelGroup === g.name && (
+                <div className="add-panel">
+                  <div className="add-panel-title">Add to "{g.name}"</div>
+                  {allFavorites.length === 0 ? (
+                    <div className="config-hint">No favorites to add.</div>
+                  ) : (
+                    <ul className="config-list">
+                      {allFavorites.map((fav) => {
+                        const alreadyIn = g.items.some((i) => itemKey(i) === itemKey(fav));
+                        return (
+                          <li key={itemKey(fav)} className={`config-row ${alreadyIn ? "already-in-group" : ""}`}>
+                            <div className="config-info">
+                              <span className="config-name">
+                                <span className="config-repo">{repoLabel(fav.repoPath)} / </span>
+                                {fav.name}
+                              </span>
+                              <span className="config-command">{fav.command}</span>
+                            </div>
+                            <div className="config-actions">
+                              {alreadyIn ? (
+                                <span className="already-badge">✓ In group</span>
+                              ) : (
+                                <button
+                                  className="mini-btn run"
+                                  onClick={() => onAddToGroup(g.name, fav)}
+                                >
+                                  + Add
+                                </button>
+                              )}
+                            </div>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </div>
+              )}
+              {!isCollapsed && addPanelGroup !== g.name &&
                 (g.items.length === 0 ? (
-                  <div className="config-hint">Empty — add favorites with the +▾ button below.</div>
+                  <div className="config-hint">Empty — add favorites with the + Add button above or drag favorites here.</div>
                 ) : (
                   <ul className="config-list">
                     {g.items.map((i, idx) =>
@@ -428,12 +654,12 @@ export default function FavoritesView({
 
         <div className="section-header remotes-toggle" onClick={toggleAllFavorites}>
           <span>
-            {showAllFavorites ? "▾" : "▸"} All favorites ({total})
+            {showAllFavorites ? <ChevronDown size={10} /> : <ChevronRight size={10} />} All favorites ({total})
           </span>
         </div>
         {total === 0 && (
           <div className="config-hint">
-            Nothing pinned yet. Open a repo's Run tab and click the ☆ on any config — it will show
+            Nothing pinned yet. Open a repo's Run tab and star any config — it will show
             up here for one-click access across all repos.
           </div>
         )}
@@ -451,47 +677,17 @@ export default function FavoritesView({
       </div>
       <div className="resizer" onMouseDown={onPanelResize} />
 
-      <div className="run-output">
-        <div className="session-tabs">
-          {sessions.map((s) => (
-            <button
-              key={s.id}
-              className={`session-tab ${active?.id === s.id ? "active" : ""} status-${s.status}`}
-              onClick={() => onSelectSession(s.id)}
-            >
-              <span className={`status-dot status-${s.status}`} />
-              {repoLabel(s.repoPath)} / {s.name}
-              {s.status === "exited" && s.exitCode !== null && s.exitCode !== 0 && ` (${s.exitCode})`}
-            </button>
-          ))}
-          {sessions.length === 0 && (
-            <span className="config-hint">Run a favorite to see its output here.</span>
-          )}
-        </div>
-        {active && (
-          <>
-            <div className="session-toolbar">
-              <span className="session-command">{active.command}</span>
-              <span className="session-actions">
-                <FreePortButton session={active} onRestart={onRestart} onError={onError} />
-                <button className="mini-btn run" title="Kill and run again" onClick={() => onRestart(active)}>
-                  ⟳ Restart
-                </button>
-                {active.status === "running" && (
-                  <button className="mini-btn danger" onClick={() => onStop(active.id)}>
-                    ■ Stop
-                  </button>
-                )}
-                <CopyButton getText={() => active.lines.map((l) => l.text).join("\n")} />
-                <button className="mini-btn" onClick={() => onClear(active.id)}>
-                  Clear
-                </button>
-              </span>
-            </div>
-            <OutputPane session={active} />
-          </>
-        )}
-      </div>
+      <SessionOutput
+        sessions={sessions}
+        activeSessionId={activeSessionId}
+        repos={repos}
+        onSelectSession={onSelectSession}
+        onRestart={onRestart}
+        onStop={onStop}
+        onClear={onClear}
+        onError={onError}
+        emptyHint="Run a favorite to see its output here."
+      />
     </div>
   );
 }

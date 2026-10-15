@@ -87,8 +87,17 @@ const SKIP_DIRS: &[&str] = &[
 fn find_repo_dirs(dir: &Path, depth: u32, found: &mut Vec<PathBuf>) {
     // a folder can be a repo AND contain nested repos (e.g. a git-inited
     // parent folder holding real project repos) — keep descending either way
-    if dir.join(".git").exists() {
-        found.push(dir.to_path_buf());
+    let git_dir = dir.join(".git");
+    if git_dir.exists() {
+        // validate it's an actual worktree, not a bare/broken .git
+        if let Ok(out) = run_git(
+            &dir.to_string_lossy().to_string(),
+            &["rev-parse", "--is-inside-work-tree"],
+        ) {
+            if out.trim() == "true" {
+                found.push(dir.to_path_buf());
+            }
+        }
     }
     if depth == 0 {
         return;

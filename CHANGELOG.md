@@ -4,7 +4,7 @@ All notable changes to VibeDeck will be documented in this file. The project fol
 
 ## [Unreleased]
 
-## [0.3.0] - 2026-09-21
+## [0.4.0] - 2026-10-15
 
 ### Added
 
@@ -39,6 +39,10 @@ All notable changes to VibeDeck will be documented in this file. The project fol
 - Clear-screen and cursor-up ANSI control sequences now correctly process in run output instead of stacking.
 - Monorepo roots with broken `.git` directories no longer appear as selectable repos.
 - Error banners from git operations no longer stick after switching repos or views.
+
+## [0.3.0] - 2026-09-21
+
+Version bump only. The features originally listed for this release were not included in its build and ship in 0.4.0 instead.
 
 ## [0.2.0] - 2026-09-08
 

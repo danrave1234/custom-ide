@@ -1,10 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import * as api from "../api";
 import type { CustomConfig, DetectedConfig, RunSession } from "../types";
-import OutputPane from "./OutputPane";
-import CopyButton from "./CopyButton";
-import FreePortButton from "./FreePortButton";
+import SessionOutput from "./SessionOutput";
 import { useResizable } from "../useResizable";
+import { Star, Play, Stop as StopIcon, Close, Plus } from "./Icons";
 
 interface Props {
   repoPath: string;
@@ -59,7 +58,6 @@ export default function RunView({
       .finally(() => setLoading(false));
   }, [repoPath, onError]);
 
-  const active = sessions.find((s) => s.id === activeSessionId) ?? sessions[0] ?? null;
   const runningIds = new Set(sessions.filter((s) => s.status === "running").map((s) => s.id));
   const pinnedNames = new Set(pinnedConfigs.map((p) => p.name));
   const sessionIdFor = (name: string) => `${repoPath}::${name}`;
@@ -99,7 +97,7 @@ export default function RunView({
           title={isPinned ? "Unpin" : "Pin to top"}
           onClick={() => onTogglePin({ name, command, cwd })}
         >
-          {isPinned ? "★" : "☆"}
+          <Star size={12} filled={isPinned} />
         </button>
         <div className="config-info" title={`${command}  (${cwd})`}>
           <span className="config-name">{name}</span>
@@ -108,16 +106,16 @@ export default function RunView({
         <div className="config-actions">
           {isRunning ? (
             <button className="mini-btn danger" onClick={() => onStop(id)}>
-              ■ Stop
+              <StopIcon size={10} /> Stop
             </button>
           ) : (
             <button className="mini-btn run" onClick={() => onStart(name, command, cwd)}>
-              ▶ Run
+              <Play size={10} /> Run
             </button>
           )}
           {opts.removable && (
             <button className="icon-btn danger" title="Remove config" onClick={() => onRemoveCustom(name)}>
-              ✕
+              <Close size={12} />
             </button>
           )}
         </div>
@@ -158,7 +156,7 @@ export default function RunView({
         {filteredPinned.length > 0 && (
           <>
             <div className="section-header">
-              <span>★ Pinned</span>
+              <span>Pinned</span>
             </div>
             <ul className="config-list">
               {filteredPinned.map((c) => configRow(c.name, c.command, c.cwd))}
@@ -169,7 +167,7 @@ export default function RunView({
         <div className="section-header">
           <span>Saved configs</span>
           <button className="mini-btn" onClick={() => setShowAdd(!showAdd)}>
-            {showAdd ? "Cancel" : "+ Add"}
+            {showAdd ? "Cancel" : <><Plus size={12} /> Add</>}
           </button>
         </div>
         {showAdd && (
@@ -222,45 +220,15 @@ export default function RunView({
       </div>
       <div className="resizer" onMouseDown={onPanelResize} />
 
-      <div className="run-output">
-        <div className="session-tabs">
-          {sessions.map((s) => (
-            <button
-              key={s.id}
-              className={`session-tab ${active?.id === s.id ? "active" : ""} status-${s.status}`}
-              onClick={() => onSelectSession(s.id)}
-            >
-              <span className={`status-dot status-${s.status}`} />
-              {s.name}
-              {s.status === "exited" && s.exitCode !== null && s.exitCode !== 0 && ` (${s.exitCode})`}
-            </button>
-          ))}
-          {sessions.length === 0 && <span className="config-hint">Run something to see its output here.</span>}
-        </div>
-        {active && (
-          <>
-            <div className="session-toolbar">
-              <span className="session-command">{active.command}</span>
-              <span className="session-actions">
-                <FreePortButton session={active} onRestart={onRestart} onError={onError} />
-                <button className="mini-btn run" title="Kill and run again" onClick={() => onRestart(active)}>
-                  ⟳ Restart
-                </button>
-                {active.status === "running" && (
-                  <button className="mini-btn danger" onClick={() => onStop(active.id)}>
-                    ■ Stop
-                  </button>
-                )}
-                <CopyButton getText={() => active.lines.map((l) => l.text).join("\n")} />
-                <button className="mini-btn" onClick={() => onClear(active.id)}>
-                  Clear
-                </button>
-              </span>
-            </div>
-            <OutputPane session={active} />
-          </>
-        )}
-      </div>
+      <SessionOutput
+        sessions={sessions}
+        activeSessionId={activeSessionId}
+        onSelectSession={onSelectSession}
+        onRestart={onRestart}
+        onStop={onStop}
+        onClear={onClear}
+        onError={onError}
+      />
     </div>
   );
 }

@@ -5,9 +5,10 @@ import { useResizable } from "../useResizable";
 interface Props {
   repoPath: string;
   onError: (msg: string) => void;
+  onSuccess?: () => void;
 }
 
-export default function EnvView({ repoPath, onError }: Props) {
+export default function EnvView({ repoPath, onError, onSuccess }: Props) {
   const [files, setFiles] = useState<string[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [content, setContent] = useState("");
@@ -21,10 +22,11 @@ export default function EnvView({ repoPath, onError }: Props) {
       const found = await api.listEnvFiles(repoPath);
       setFiles(found);
       setSelected((prev) => (prev && found.includes(prev) ? prev : found[0] ?? null));
+      onSuccess?.();
     } catch (e) {
       onError(String(e));
     }
-  }, [repoPath, onError]);
+  }, [repoPath, onError, onSuccess]);
 
   useEffect(() => {
     setSelected(null);

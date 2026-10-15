@@ -1,3 +1,4 @@
+mod agent;
 mod env_files;
 mod git;
 mod ports;
@@ -6,6 +7,7 @@ mod runs;
 mod store;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 use tauri::Manager;
 
 static WINDOW_COUNT: AtomicUsize = AtomicUsize::new(1);
@@ -28,12 +30,16 @@ fn new_window(app: tauri::AppHandle) -> Result<(), String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let agent_state = Arc::new(agent::AgentState::new());
+    let agent_state_clone = agent_state.clone();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(runs::ProcessManager::default())
         .manage(runs::WatchManager::default())
         .manage(pty::PtyManager::default())
+        .manage(agent_state)
         .invoke_handler(tauri::generate_handler![
             git::scan_repos,
             git::refresh_repo,
@@ -74,6 +80,11 @@ pub fn run() {
             pty::pty_resize,
             pty::pty_close,
         ])
+        .setup(|app| {
+            // Start the agent HTTP server
+            agent::AgentState::start(app.handle().clone(), agent_state_clone);
+            Ok(())
+        })
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app_handle, event| {

@@ -8,6 +8,7 @@ import { useResizable } from "../useResizable";
 interface Props {
   repoPath: string;
   onError: (msg: string) => void;
+  onSuccess?: () => void;
   onRepoChanged: () => void;
 }
 
@@ -19,7 +20,7 @@ interface SelectedFile {
 const statusLabel = (code: string) =>
   ({ M: "M", A: "A", D: "D", R: "R", C: "C", U: "U", "?": "U" }[code] ?? code);
 
-export default function ChangesView({ repoPath, onError, onRepoChanged }: Props) {
+export default function ChangesView({ repoPath, onError, onSuccess, onRepoChanged }: Props) {
   const [status, setStatus] = useState<RepoStatus | null>(null);
   const [selected, setSelected] = useState<SelectedFile | null>(null);
   const [patch, setPatch] = useState("");
@@ -37,10 +38,11 @@ export default function ChangesView({ repoPath, onError, onRepoChanged }: Props)
     try {
       const s = await api.repoStatus(repoPath);
       setStatus(s);
+      onSuccess?.();
     } catch (e) {
       onError(String(e));
     }
-  }, [repoPath, onError]);
+  }, [repoPath, onError, onSuccess]);
 
   useEffect(() => {
     setSelected(null);

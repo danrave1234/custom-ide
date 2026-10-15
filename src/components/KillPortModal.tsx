@@ -1,6 +1,7 @@
 import { useState } from "react";
 import * as api from "../api";
 import type { PortProcess } from "../api";
+import { Close } from "./Icons";
 
 interface Props {
   onClose: () => void;
@@ -45,9 +46,9 @@ export default function KillPortModal({ onClose }: Props) {
       <div className="modal-backdrop" onClick={onClose} />
       <div className="modal" role="dialog">
         <div className="modal-header">
-          <span>🔌 Kill port</span>
+          <span>Kill port</span>
           <button className="icon-btn" onClick={onClose}>
-            ✕
+            <Close size={14} />
           </button>
         </div>
         <form
@@ -87,7 +88,7 @@ export default function KillPortModal({ onClose }: Props) {
                     </span>
                   </div>
                   <button className="mini-btn danger" onClick={() => kill(p)}>
-                    ✕ Kill
+                    <Close size={12} /> Kill
                   </button>
                 </div>
               ))

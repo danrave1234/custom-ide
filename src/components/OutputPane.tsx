@@ -46,7 +46,13 @@ export default function OutputPane({ session }: Props) {
       {session.lines.map((line, i) => (
         <Row key={i} line={line} />
       ))}
-      {session.lines.length === 0 && <div className="out-line out-system">Waiting for output…</div>}
+      {session.lines.length === 0 && (
+        <div className="out-empty">
+          <div className="out-empty-icon">⌘</div>
+          <div className="out-empty-text">No output yet</div>
+          <div className="out-empty-hint">Run a command to see output here</div>
+        </div>
+      )}
     </div>
   );
 }

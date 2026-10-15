@@ -21,11 +21,12 @@ import RunView from "./components/RunView";
 import FavoritesView from "./components/FavoritesView";
 import SyncView from "./components/SyncView";
 import EnvView from "./components/EnvView";
-import OutputDrawer from "./components/OutputDrawer";
+import BottomPanel from "./components/BottomPanel";
 import KillPortModal from "./components/KillPortModal";
-import TerminalDrawer from "./components/TerminalDrawer";
 import CommandPalette, { type CommandItem } from "./components/CommandPalette";
+import { Menu, ChevronDown, Close, Folder, Terminal as TerminalIcon } from "./components/Icons";
 import { useResizable } from "./useResizable";
+import { appendRunOutput } from "./outputBuffer";
 import "./App.css";
 
 declare const __APP_VERSION__: string;
@@ -56,15 +57,15 @@ export default function App() {
   const [selectedRepo, setSelectedRepo] = useState<string | null>(null);
   const [view, setView] = useState<View>("favorites");
   const [tab, setTab] = useState<Tab>("changes");
-  const [sidebarOpen, setSidebarOpen] = useState(() => localStorage.getItem("vd-sidebar-open") === "1");
+  const [sidebarOpen, setSidebarOpen] = useState(() => localStorage.getItem("vd-sidebar-open") !== "0");
   const [switcherOpen, setSwitcherOpen] = useState(false);
   const [killPortOpen, setKillPortOpen] = useState(false);
   const [lastSaved, setLastSaved] = useState<string | null>(null);
-  const [terminalOpen, setTerminalOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
+  const [bottomOpen, setBottomOpen] = useState(false);
 
-  const toggleTerminal = () => setTerminalOpen((v) => !v);
+  const toggleBottom = () => setBottomOpen((v) => !v);
 
   // Global navigation shortcuts
   useEffect(() => {
@@ -75,7 +76,7 @@ export default function App() {
       }
       if (e.ctrlKey && e.key === "`") {
         e.preventDefault();
-        setTerminalOpen((v) => !v);
+        setBottomOpen((v) => !v);
       }
       if (e.key === "Escape") {
         setPaletteOpen(false);
@@ -96,14 +97,6 @@ export default function App() {
   const [sessions, setSessions] = useState<RunSession[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [sidebarWidth, onSidebarResize] = useResizable("vd-sidebar-w", 250, 180, 480);
-  const [drawerOpen, setDrawerOpen] = useState(() => localStorage.getItem("vd-drawer-open") === "1");
-
-  const toggleDrawer = () => {
-    setDrawerOpen((open) => {
-      localStorage.setItem("vd-drawer-open", open ? "0" : "1");
-      return !open;
-    });
-  };
 
   const sessionsRef = useRef(sessions);
   sessionsRef.current = sessions;
@@ -187,7 +180,7 @@ export default function App() {
       prev.map((s) => {
         const add = pending.get(s.id);
         if (!add) return s;
-        let lines = s.lines.concat(add);
+        let lines = appendRunOutput(s.lines, add);
         if (lines.length > MAX_LINES + TRIM_SLACK) {
           lines = lines.slice(lines.length - MAX_LINES);
         }
@@ -286,7 +279,7 @@ export default function App() {
         exitCode: null,
         lines: [
           ...(restartMessage ? [{ text: restartMessage, stream: "system" as const }] : []),
-          { text: `▶ ${command}   (${cwd})`, stream: "system" },
+          { text: `→ ${command}   (${cwd})`, stream: "system" },
         ],
       };
       stoppedRunIds.current.delete(id);
@@ -294,7 +287,10 @@ export default function App() {
       setActiveSessionId(id);
       try {
         await api.startRun(id, cwd, command);
-        await api.watchRunChanges(id, repoPath).catch((e) => {
+        // Watch the run's own folder (e.g. backend/), not the whole repo, so
+        // churn from a sibling app (frontend dev server, temp files) can't
+        // restart it.
+        await api.watchRunChanges(id, cwd || repoPath).catch((e) => {
           setSessions((prev) =>
             prev.map((s) =>
               s.id === id
@@ -360,6 +356,7 @@ export default function App() {
     [startRun]
   );
 
+  // Auto-restart on file change
   useEffect(() => {
     const unlistenChange = listen<RunChangeEvent>("run-change", (event) => {
       for (const id of event.payload.ids) {
@@ -379,6 +376,80 @@ export default function App() {
       unlistenChange.then((fn) => fn());
     };
   }, [restartRun]);
+
+  // Agent API bridge: listen for agent-ui events and mirror them into UI actions
+  useEffect(() => {
+    const unlisten = listen<any>("agent-ui", (event) => {
+      const { action, ...payload } = event.payload;
+      switch (action) {
+        case "openWorkspace": {
+          if (payload.path) openWorkspace(payload.path);
+          break;
+        }
+        case "selectRepo": {
+          const target = payload.path ?? payload.name;
+          if (target) {
+            const found = repos.find(
+              (r) => r.path === target || r.name.toLowerCase() === target.toLowerCase()
+            );
+            if (found) {
+              setSelectedRepo(found.path);
+              setView("repo");
+              setError(null);
+            }
+          }
+          break;
+        }
+        case "startRun": {
+          const { name, command, cwd, repoPath } = payload;
+          if (name && command && cwd) {
+            startRun(repoPath ?? cwd, name, command, cwd);
+            // Open bottom panel on output mode so agent runs are visible
+            setBottomOpen(true);
+          }
+          break;
+        }
+        case "stopRun": {
+          if (payload.id) stopRun(payload.id);
+          break;
+        }
+        case "setView": {
+          if (payload.view) setView(payload.view);
+          if (payload.tab) setTab(payload.tab);
+          break;
+        }
+        case "runGroup": {
+          if (payload.name) {
+            const groups = (root && persisted?.groupsByRoot?.[root]) || [];
+            const group = groups.find((g) => g.name === payload.name);
+            if (group && group.items.length) {
+              setView("favorites");
+              // Sequentially start items with delay
+              let idx = 0;
+              const next = () => {
+                if (idx >= group.items.length) return;
+                const item = group.items[idx];
+                const itemKey = `${item.repoPath}::${item.name}`;
+                const existing = sessionsRef.current.find((s) => s.id === itemKey);
+                if (existing?.status !== "running") {
+                  startRun(item.repoPath, item.name, item.command, item.cwd);
+                }
+                idx++;
+                if (idx < group.items.length) {
+                  setTimeout(next, (group.delaySeconds ?? 3) * 1000);
+                }
+              };
+              next();
+            }
+          }
+          break;
+        }
+      }
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, [openWorkspace, repos, startRun, stopRun, persisted, root, sessionsRef]);
 
   const clearRun = useCallback((id: string) => {
     const target = sessionsRef.current.find((s) => s.id === id);
@@ -504,6 +575,15 @@ export default function App() {
     setGroups(currentGroups().map((g) => (g.name === groupName ? { ...g, icon } : g)));
   };
 
+  const renameGroup = (oldName: string, newName: string) => {
+    if (oldName === newName) return;
+    if (currentGroups().some((g) => g.name.toLowerCase() === newName.toLowerCase())) {
+      showError(`A group named "${newName}" already exists.`);
+      return;
+    }
+    setGroups(currentGroups().map((g) => (g.name === oldName ? { ...g, name: newName } : g)));
+  };
+
   const syncPrefs =
     (root && persisted?.syncPrefs?.[root]) || DEFAULT_SYNC_PREFS;
 
@@ -570,6 +650,7 @@ export default function App() {
           action: () => {
             setSelectedRepo(repo.path);
             setView("repo");
+            setError(null);
             setSidebarOpen(true);
           },
         })),
@@ -601,10 +682,10 @@ export default function App() {
         })),
         {
           id: "action-terminal",
-          label: terminalOpen ? "Hide terminal" : "Show terminal",
+          label: bottomOpen ? "Hide bottom panel" : "Show bottom panel",
           detail: "Ctrl+`",
           group: "Action",
-          action: toggleTerminal,
+          action: toggleBottom,
         },
         {
           id: "action-rescan",
@@ -631,8 +712,8 @@ export default function App() {
   if (!root) {
     return (
       <div className="welcome">
-        <h1>⚡ VibeDeck</h1>
-        <p>Git branches, diffs and run configs for AI-assisted coding — without the IDE weight.</p>
+        <h1>VibeDeck</h1>
+        <p>Git branches, diffs and run configs for local development.</p>
         <button className="primary-btn big" onClick={pickAndOpen}>
           Open workspace folder
         </button>
@@ -659,16 +740,16 @@ export default function App() {
           title={sidebarOpen ? "Hide sidebar" : "Show sidebar"}
           onClick={toggleSidebar}
         >
-          ☰
+          <Menu size={16} />
         </button>
-        <span className="app-name">⚡ VibeDeck</span>
+        <span className="app-name">VibeDeck</span>
         <div className="workspace-switcher">
           <button
             className="workspace-name ws-button"
             title={root}
             onClick={() => setSwitcherOpen(!switcherOpen)}
           >
-            {workspaceName} ▾
+            {workspaceName} <ChevronDown size={12} />
           </button>
           {switcherOpen && (
             <>
@@ -685,7 +766,7 @@ export default function App() {
                       if (r !== root) openWorkspace(r);
                     }}
                   >
-                    {r === root ? "● " : ""}
+                    {r === root ? "" : ""}
                     {r.split(/[\\/]/).filter(Boolean).pop()}
                     <span className="ws-path">{r}</span>
                   </button>
@@ -698,7 +779,8 @@ export default function App() {
                     pickAndOpen();
                   }}
                 >
-                  📂 Open folder…
+                  <Folder size={14} />
+                  Open folder…
                 </button>
                 <button
                   className="ws-item"
@@ -707,7 +789,7 @@ export default function App() {
                     api.newWindow().catch((e) => showError(String(e)));
                   }}
                 >
-                  🗗 New window
+                  New window
                 </button>
               </div>
             </>
@@ -719,17 +801,21 @@ export default function App() {
           <kbd>Ctrl K</kbd>
         </button>
         {totalRunning > 0 && (
-          <span className="running-indicator">
+          <button
+            className="running-indicator running-indicator-btn"
+            onClick={() => setBottomOpen(true)}
+            title={`Open run output (${totalRunning} running)`}
+          >
             <span className="running-dot" /> {totalRunning} running
-          </span>
+          </button>
         )}
         <span className="topbar-spacer" />
         <button
-          className={`mini-btn ${terminalOpen ? "active-btn" : ""}`}
-          onClick={toggleTerminal}
-          title="Toggle terminal (Ctrl+`)"
+          className={`mini-btn ${bottomOpen ? "active-btn" : ""}`}
+          onClick={toggleBottom}
+          title="Toggle bottom panel (Ctrl+`)"
         >
-          &gt;_ Terminal
+          <TerminalIcon size={14} /> Terminal
         </button>
         <div className="more-menu">
           <button className={`mini-btn more-button ${moreOpen ? "active-btn" : ""}`} onClick={() => setMoreOpen(!moreOpen)} aria-expanded={moreOpen} aria-label="More actions">•••</button>
@@ -737,7 +823,7 @@ export default function App() {
             <>
               <div className="ws-backdrop" onClick={() => setMoreOpen(false)} />
               <div className="more-dropdown">
-                <button onClick={() => { setMoreOpen(false); setKillPortOpen(true); }}>🔌 Kill process on port…</button>
+                <button onClick={() => { setMoreOpen(false); setKillPortOpen(true); }}>Kill process on port…</button>
                 <button onClick={() => { setMoreOpen(false); void pickAndOpen(); }}>Open folder…</button>
                 <button onClick={() => { setMoreOpen(false); void api.newWindow().catch((e) => showError(String(e))); }}>New window</button>
                 <div className="ws-divider" />
@@ -754,7 +840,7 @@ export default function App() {
         <div className="error-bar">
           <span>{error}</span>
           <button className="icon-btn" onClick={() => setError(null)}>
-            ✕
+            <Close size={14} />
           </button>
         </div>
       )}
@@ -764,11 +850,13 @@ export default function App() {
           <>
             <Sidebar
               repos={repos}
+              root={root}
               selected={view === "repo" ? selectedRepo : null}
               runningByRepo={runningByRepo}
               onSelect={(path) => {
                 setSelectedRepo(path);
                 setView("repo");
+                setError(null);
               }}
               onRefresh={() => openWorkspace(root)}
               loading={scanning}
@@ -812,6 +900,7 @@ export default function App() {
               onError={showError}
               onAddGroup={addGroup}
               onRemoveGroup={removeGroup}
+              onRenameGroup={renameGroup}
               onAddToGroup={addToGroup}
               onRemoveFromGroup={removeFromGroup}
               onMoveInGroup={moveInGroup}
@@ -821,6 +910,25 @@ export default function App() {
             />
           ) : selectedRepo ? (
             <>
+              {(() => {
+                const selRepo = repos.find((r) => r.path === selectedRepo);
+                if (!selRepo) return null;
+                return (
+                  <div className="repo-header">
+                    <div className="repo-header-main">
+                      <span className="repo-header-name">{selRepo.name}</span>
+                      <span className="repo-header-branch">{selRepo.branch}</span>
+                      {selRepo.changed_files > 0 && (
+                        <span className="badge badge-changes" title={`${selRepo.changed_files} changed file(s)`}>
+                          {selRepo.changed_files}
+                        </span>
+                      )}
+                      {selRepo.ahead > 0 && <span className="badge badge-ahead" title={`${selRepo.ahead} commit(s) ahead`}>↑{selRepo.ahead}</span>}
+                      {selRepo.behind > 0 && <span className="badge badge-behind" title={`${selRepo.behind} commit(s) behind`}>↓{selRepo.behind}</span>}
+                    </div>
+                  </div>
+                );
+              })()}
               <nav className="tabs" role="tablist" aria-label="Repository views">
                 {(["changes", "branches", "history", "run", "env"] as Tab[]).map((t) => (
                   <button
@@ -830,7 +938,9 @@ export default function App() {
                     role="tab"
                     aria-selected={tab === t}
                   >
-                    {t === "run" && (runningByRepo[selectedRepo] ?? 0) > 0 ? "run ●" : t}
+                    {t === "run" && (runningByRepo[selectedRepo] ?? 0) > 0
+                      ? `Run (${runningByRepo[selectedRepo]})`
+                      : t.charAt(0).toUpperCase() + t.slice(1)}
                   </button>
                 ))}
               </nav>
@@ -839,6 +949,7 @@ export default function App() {
                   <ChangesView
                     repoPath={selectedRepo}
                     onError={showError}
+                    onSuccess={() => setError(null)}
                     onRepoChanged={refreshSelectedRepo}
                   />
                 )}
@@ -846,11 +957,12 @@ export default function App() {
                   <BranchesView
                     repoPath={selectedRepo}
                     onError={showError}
+                    onSuccess={() => setError(null)}
                     onRepoChanged={refreshSelectedRepo}
                   />
                 )}
-                {tab === "history" && <HistoryView repoPath={selectedRepo} onError={showError} />}
-                {tab === "env" && <EnvView repoPath={selectedRepo} onError={showError} />}
+                {tab === "history" && <HistoryView repoPath={selectedRepo} onError={showError} onSuccess={() => setError(null)} />}
+                {tab === "env" && <EnvView repoPath={selectedRepo} onError={showError} onSuccess={() => setError(null)} />}
                 {tab === "run" && (
                   <RunView
                     repoPath={selectedRepo}
@@ -870,30 +982,29 @@ export default function App() {
                   />
                 )}
               </div>
-              {tab !== "run" && (
-                <OutputDrawer
-                  sessions={sessions}
-                  repos={repos}
-                  activeSessionId={activeSessionId}
-                  open={drawerOpen}
-                  onToggle={toggleDrawer}
-                  onSelectSession={setActiveSessionId}
-                  onRestart={restartRun}
-                  onStop={stopRun}
-                  onClear={clearRun}
-                  onError={showError}
-                />
-              )}
             </>
           ) : (
-            <div className="diff-empty">Select a repository</div>
+            <div className="welcome-empty">
+              <div className="welcome-empty-text">Select a repository to get started</div>
+              <div className="welcome-empty-hint">
+                Choose a repo from the sidebar, or open <strong>Favorites</strong> to run pinned configs
+              </div>
+            </div>
           )}
         </section>
       </div>
 
-      <TerminalDrawer
-        open={terminalOpen}
-        onToggle={toggleTerminal}
+      <BottomPanel
+        open={bottomOpen}
+        sessions={sessions}
+        repos={repos}
+        activeSessionId={activeSessionId}
+        onToggle={toggleBottom}
+        onSelectSession={setActiveSessionId}
+        onRestart={restartRun}
+        onStop={stopRun}
+        onClear={clearRun}
+        onError={showError}
         defaultCwd={(view === "repo" && selectedRepo) || root}
         defaultLabel={
           view === "repo" && selectedRepo
