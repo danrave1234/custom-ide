@@ -23,6 +23,7 @@ import SyncView from "./components/SyncView";
 import EnvView from "./components/EnvView";
 import BottomPanel, { type TerminalRequest } from "./components/BottomPanel";
 import Logo from "./components/Logo";
+import { containingRoot, pathKey } from "./codeLines";
 import type { CodeRoot, OpenFileRequest } from "./components/CodeView";
 import KillPortModal from "./components/KillPortModal";
 import CommandPalette, { type CommandItem } from "./components/CommandPalette";
@@ -431,10 +432,24 @@ export default function App() {
     };
   }, [restartRun]);
 
-  // Agent API bridge: listen for agent-ui events and mirror them into UI actions
+  // Agent API bridge: mirror agent-ui events into UI actions. The handler is
+  // swapped through a ref so the listener is registered exactly once; the
+  // backend queues actions until `agentUiReady` says this window is listening.
+  const agentUiHandler = useRef<(payload: any) => void>(() => {});
   useEffect(() => {
-    const unlisten = listen<any>("agent-ui", (event) => {
-      const { action, ...payload } = event.payload;
+    let cancelled = false;
+    const unlisten = listen<any>("agent-ui", (event) => agentUiHandler.current(event.payload));
+    unlisten.then(() => {
+      if (!cancelled) api.agentUiReady().catch(() => {});
+    });
+    return () => {
+      cancelled = true;
+      unlisten.then((fn) => fn());
+    };
+  }, []);
+  useEffect(() => {
+    agentUiHandler.current = (eventPayload: any) => {
+      const { action, ...payload } = eventPayload;
       switch (action) {
         case "openWorkspace": {
           if (payload.path) openWorkspace(payload.path);
@@ -444,9 +459,10 @@ export default function App() {
           const target = payload.path ?? payload.name;
           if (target) {
             const found = repos.find(
-              (r) => r.path === target || r.name.toLowerCase() === target.toLowerCase()
+              (r) => pathKey(r.path) === pathKey(target) || r.name.toLowerCase() === target.toLowerCase()
             );
             if (found) {
+              setMode("dashboard");
               setSelectedRepo(found.path);
               setView("repo");
               setError(null);
@@ -525,11 +541,8 @@ export default function App() {
           break;
         }
       }
-    });
-    return () => {
-      unlisten.then((fn) => fn());
     };
-  }, [openWorkspace, repos, startRun, stopRun, persisted, root, sessionsRef, openTerminal, dismissNotice, setMode, showFile]);
+  });
 
   const clearRun = useCallback((id: string) => {
     const target = sessionsRef.current.find((s) => s.id === id);
@@ -773,7 +786,7 @@ export default function App() {
         })),
         ...agentClis.map((agent) => {
           const cwd = (view === "repo" && selectedRepo) || root;
-          const label = cwd.split(/[\/]/).filter(Boolean).pop() ?? "workspace";
+          const label = cwd.split(/[\\/]/).filter(Boolean).pop() ?? "workspace";
           return {
             id: `agent-${agent.id}`,
             label: `Launch ${agent.name}`,
@@ -987,22 +1000,25 @@ export default function App() {
               <div className="agent-notice-body">
                 <strong>{n.title}</strong>
                 <span>{n.message}</span>
-                {n.repo && (
-                  <button
-                    className="link-btn"
-                    onClick={() => {
-                      const found = repos.find((r) => r.path === n.repo);
-                      if (found) {
-                        setSelectedRepo(found.path);
+                {(() => {
+                  // hooks report their cwd, which may be a subfolder or use other separators
+                  const repoPath = n.repo ? containingRoot(repos.map((r) => r.path), n.repo) : null;
+                  if (!repoPath) return null;
+                  return (
+                    <button
+                      className="link-btn"
+                      onClick={() => {
+                        setSelectedRepo(repoPath);
                         setView("repo");
                         setTab("changes");
-                      }
-                      dismissNotice(n.id);
-                    }}
-                  >
-                    Review changes
-                  </button>
-                )}
+                        setMode("dashboard");
+                        dismissNotice(n.id);
+                      }}
+                    >
+                      Review changes
+                    </button>
+                  );
+                })()}
               </div>
               <button className="icon-btn" title="Dismiss" onClick={() => dismissNotice(n.id)}>
                 <Close size={12} />
@@ -1028,6 +1044,7 @@ export default function App() {
               roots={codeRoots}
               initialRoot={selectedRepo ?? root}
               explorerOpen={sidebarOpen}
+              visible={mode === "code"}
               openRequest={openFileRequest}
               onError={showError}
             />

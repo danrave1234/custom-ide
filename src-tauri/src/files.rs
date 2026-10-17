@@ -132,11 +132,22 @@ pub fn list_files(root: String) -> Result<Vec<String>, String> {
     let base = fs::canonicalize(&root).map_err(|e| e.to_string())?;
     let is_repo_root = base.join(".git").exists();
     if is_repo_root {
+        // -z: without it git C-quotes non-ASCII names ("caf\303\251.ts")
         if let Ok(out) = super::git::run_git(
             &root,
-            &["ls-files", "--cached", "--others", "--exclude-standard"],
+            &[
+                "ls-files",
+                "-z",
+                "--cached",
+                "--others",
+                "--exclude-standard",
+            ],
         ) {
-            let mut files: Vec<String> = out.lines().map(str::to_string).collect();
+            let mut files: Vec<String> = out
+                .split('\0')
+                .filter(|f| !f.is_empty())
+                .map(str::to_string)
+                .collect();
             files.dedup();
             return Ok(files);
         }
@@ -204,6 +215,19 @@ mod tests {
         let files = list_files(root.to_string_lossy().to_string()).unwrap();
         assert!(files.contains(&"src/nested/a.txt".to_string()));
         assert!(!files.iter().any(|f| f.starts_with("node_modules")));
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn git_index_keeps_non_ascii_and_spaced_names_verbatim() {
+        let root = temp_tree();
+        let r = root.to_string_lossy().to_string();
+        crate::git::run_git(&r, &["init", "-q"]).unwrap();
+        fs::write(root.join("café.ts"), "x").unwrap();
+        fs::write(root.join("a b.ts"), "x").unwrap();
+        let files = list_files(r).unwrap();
+        assert!(files.contains(&"café.ts".to_string()), "{files:?}");
+        assert!(files.contains(&"a b.ts".to_string()), "{files:?}");
         fs::remove_dir_all(root).ok();
     }
 }

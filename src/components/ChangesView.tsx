@@ -200,7 +200,7 @@ export default function ChangesView({ repoPath, onError, onSuccess, onRepoChange
               className="mini-btn"
               onClick={() => {
                 const first = [...changeMarks(patch).keys()].sort((a, b) => a - b)[0];
-                onOpenFile(`${repoPath.replace(/[\/]+$/, "")}/${selected.file.path}`, first);
+                onOpenFile(`${repoPath.replace(/[\\/]+$/, "")}/${selected.file.path}`, first);
               }}
               title="Show the whole file in the Code view, at the first change"
             >

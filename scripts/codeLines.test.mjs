@@ -54,3 +54,12 @@ test("fuzzy score prefers file-name prefix matches", () => {
 test("escapeHtml escapes markup", () => {
   assert.equal(escapeHtml('<a href="x">&</a>'), "&lt;a href=&quot;x&quot;&gt;&amp;&lt;/a&gt;");
 });
+
+test("containingRoot matches across separators, case and subfolders", async () => {
+  const { containingRoot } = await import("../src/codeLines.ts");
+  const roots = ["C:/work/app", "C:\\work\\app\\packages\\api", "C:/work/other"];
+  assert.equal(containingRoot(roots, "c:\\Work\\App"), "C:/work/app");
+  assert.equal(containingRoot(roots, "C:\\work\\app\\src\\x.ts"), "C:/work/app");
+  assert.equal(containingRoot(roots, "C:/work/app/packages/api/src"), "C:\\work\\app\\packages\\api");
+  assert.equal(containingRoot(roots, "C:/work/application"), null);
+});

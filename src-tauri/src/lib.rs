@@ -103,6 +103,7 @@ pub fn run() {
             pty::pty_resize,
             pty::pty_close,
             agents::detect_agent_clis,
+            agent::agent_ui_ready,
             files::list_dir,
             files::read_text_file,
             files::list_files,

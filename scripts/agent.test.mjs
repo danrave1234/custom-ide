@@ -5,8 +5,10 @@ import { configPaths } from "./agent.mjs";
 
 // The app writes agent.json to Tauri's app_config_dir: <config dir>/<bundle identifier>.
 test("windows token lives in roaming APPDATA under the bundle identifier", () => {
-  const [p] = configPaths({ APPDATA: "C:\Users\me\AppData\Roaming" }, "win32");
-  assert.equal(p, join("C:\Users\me\AppData\Roaming", "com.danrave.vibedeck", "agent.json"));
+  const appData = "C:\\Users\\me\\AppData\\Roaming";
+  const [p] = configPaths({ APPDATA: appData }, "win32");
+  assert.equal(p, join(appData, "com.danrave.vibedeck", "agent.json"));
+  assert.ok(p.startsWith(appData), "must be under roaming APPDATA, not LOCALAPPDATA");
 });
 
 test("macOS token lives in Application Support", () => {

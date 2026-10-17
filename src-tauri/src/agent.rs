@@ -74,6 +74,71 @@ fn env_any(names: &[&str]) -> Option<String> {
 pub struct AgentState {
     config: Mutex<Option<AgentConfig>>,
     output: Mutex<HashMap<String, OutputBuffer>>,
+    ui: Mutex<UiBridge>,
+}
+
+/// UI actions requested over the API are delivered as `agent-ui` events to one
+/// window whose frontend has said it is listening (`agent_ui_ready`). Until a
+/// window is ready (app still starting, page reloading) actions are queued
+/// instead of being silently dropped.
+#[derive(Default)]
+struct UiBridge {
+    /// labels of windows whose `agent-ui` listener is registered
+    ready: Vec<String>,
+    pending: Vec<Value>,
+}
+
+/// Oldest queued UI actions are dropped beyond this.
+const MAX_PENDING_UI: usize = 50;
+
+/// Deliver a UI action to the focused ready window (else the first ready one),
+/// or queue it. Returns true when it had to be queued.
+pub fn emit_ui(app: &tauri::AppHandle, payload: Value) -> bool {
+    let Some(state) = app.try_state::<Arc<AgentState>>() else {
+        let _ = app.emit("agent-ui", payload);
+        return false;
+    };
+    let mut ui = state.ui.lock().unwrap();
+    ui.ready.retain(|l| app.get_webview_window(l).is_some());
+    let focused = ui.ready.iter().find(|l| {
+        app.get_webview_window(l)
+            .and_then(|w| w.is_focused().ok())
+            .unwrap_or(false)
+    });
+    match focused.or(ui.ready.first()).cloned() {
+        Some(label) => {
+            drop(ui);
+            let _ = app.emit_to(label.as_str(), "agent-ui", payload);
+            false
+        }
+        None => {
+            if ui.pending.len() >= MAX_PENDING_UI {
+                ui.pending.remove(0);
+            }
+            ui.pending.push(payload);
+            true
+        }
+    }
+}
+
+/// Called by each window once its `agent-ui` listener is registered; flushes
+/// any actions that arrived before it was ready.
+#[tauri::command]
+pub fn agent_ui_ready(app: tauri::AppHandle, window: tauri::WebviewWindow) {
+    let Some(state) = app.try_state::<Arc<AgentState>>() else {
+        return;
+    };
+    let label = window.label().to_string();
+    let pending = {
+        let mut ui = state.ui.lock().unwrap();
+        if !ui.ready.contains(&label) {
+            ui.ready.push(label.clone());
+        }
+        std::mem::take(&mut ui.pending)
+    };
+    for payload in pending {
+        let _ = app.emit_to(label.as_str(), "agent-ui", payload);
+    }
 }
 
 impl AgentState {
@@ -81,6 +146,7 @@ impl AgentState {
         Self {
             config: Mutex::new(None),
             output: Mutex::new(HashMap::new()),
+            ui: Mutex::new(UiBridge::default()),
         }
     }
 
@@ -191,6 +257,8 @@ impl AgentState {
 
 fn handle_connection(stream: TcpStream, app: &tauri::AppHandle, state: &AgentState, token: &str) {
     let mut stream = stream;
+    // a client that connects and never finishes its request must not pin this thread
+    let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(10)));
     let mut reader = BufReader::new(&mut stream);
     let mut request_line = String::new();
     if reader.read_line(&mut request_line).is_err() {
@@ -236,6 +304,11 @@ fn handle_connection(stream: TcpStream, app: &tauri::AppHandle, state: &AgentSta
     }
 
     // Read body
+    if content_length > MAX_BODY {
+        drop(reader);
+        send_response(stream, 413, &json!({"error": "request body too large"}));
+        return;
+    }
     let Some(body) = read_body(&mut reader, content_length) else {
         return;
     };
@@ -313,6 +386,7 @@ fn send_response(mut stream: TcpStream, status: u16, body: &Value) {
         400 => "Bad Request",
         401 => "Unauthorized",
         404 => "Not Found",
+        413 => "Payload Too Large",
         500 => "Internal Server Error",
         _ => "Unknown",
     };
@@ -354,14 +428,14 @@ fn post_workspace_open(body: &Option<Value>, app: &tauri::AppHandle) -> (u16, Va
         return (400, json!({"error": "path is required"}));
     };
     // Emit UI event to open workspace
-    let _ = app.emit(
-        "agent-ui",
+    let queued = emit_ui(
+        app,
         json!({
             "action": "openWorkspace",
             "path": path
         }),
     );
-    (200, json!({"ok": true, "path": path}))
+    (200, json!({"ok": true, "queued": queued, "path": path}))
 }
 
 fn get_repos(app: &tauri::AppHandle) -> (u16, Value) {
@@ -389,14 +463,17 @@ fn post_repo_select(body: &Option<Value>, app: &tauri::AppHandle) -> (u16, Value
     ) else {
         return (400, json!({"error": "path or name is required"}));
     };
-    let _ = app.emit(
-        "agent-ui",
+    let queued = emit_ui(
+        app,
         json!({
             "action": "selectRepo",
             "path": path_or_name
         }),
     );
-    (200, json!({"ok": true, "path": path_or_name}))
+    (
+        200,
+        json!({"ok": true, "queued": queued, "path": path_or_name}),
+    )
 }
 
 fn get_configs(query: &str, body: &Option<Value>) -> (u16, Value) {
@@ -441,8 +518,8 @@ fn post_run(body: &Option<Value>, app: &tauri::AppHandle) -> (u16, Value) {
     };
 
     // Emit to UI to start the run (UI handles session creation + backend start)
-    let _ = app.emit(
-        "agent-ui",
+    let queued = emit_ui(
+        app,
         json!({
             "action": "startRun",
             "id": id,
@@ -453,7 +530,10 @@ fn post_run(body: &Option<Value>, app: &tauri::AppHandle) -> (u16, Value) {
         }),
     );
 
-    (200, json!({"ok": true, "id": id, "name": name}))
+    (
+        200,
+        json!({"ok": true, "queued": queued, "id": id, "name": name}),
+    )
 }
 
 fn post_run_stop(body: &Option<Value>, app: &tauri::AppHandle) -> (u16, Value) {
@@ -464,14 +544,14 @@ fn post_run_stop(body: &Option<Value>, app: &tauri::AppHandle) -> (u16, Value) {
     let Some(id) = id else {
         return (400, json!({"error": "id is required"}));
     };
-    let _ = app.emit(
-        "agent-ui",
+    let queued = emit_ui(
+        app,
         json!({
             "action": "stopRun",
             "id": id
         }),
     );
-    (200, json!({"ok": true, "id": id}))
+    (200, json!({"ok": true, "queued": queued, "id": id}))
 }
 
 fn get_runs(app: &tauri::AppHandle) -> (u16, Value) {
@@ -555,8 +635,8 @@ fn post_terminal_open(body: &Option<Value>, app: &tauri::AppHandle) -> (u16, Val
         (None, None) => None,
     };
     let title = str_field("title").or_else(|| agent.clone());
-    let _ = app.emit(
-        "agent-ui",
+    let queued = emit_ui(
+        app,
         json!({
             "action": "openTerminal",
             "cwd": cwd,
@@ -564,7 +644,10 @@ fn post_terminal_open(body: &Option<Value>, app: &tauri::AppHandle) -> (u16, Val
             "title": title
         }),
     );
-    (200, json!({"ok": true, "cwd": cwd, "command": command}))
+    (
+        200,
+        json!({"ok": true, "queued": queued, "cwd": cwd, "command": command}),
+    )
 }
 
 fn post_notify(body: &Option<Value>, app: &tauri::AppHandle) -> (u16, Value) {
@@ -579,8 +662,8 @@ fn post_notify(body: &Option<Value>, app: &tauri::AppHandle) -> (u16, Value) {
         Some(l @ ("info" | "success" | "warning" | "error")) => l,
         _ => "info",
     };
-    let _ = app.emit(
-        "agent-ui",
+    let queued = emit_ui(
+        app,
         json!({
             "action": "notify",
             "title": field("title").unwrap_or("Agent"),
@@ -589,7 +672,7 @@ fn post_notify(body: &Option<Value>, app: &tauri::AppHandle) -> (u16, Value) {
             "repo": field("repo")
         }),
     );
-    (200, json!({"ok": true}))
+    (200, json!({"ok": true, "queued": queued}))
 }
 
 fn post_file_open(body: &Option<Value>, app: &tauri::AppHandle) -> (u16, Value) {
@@ -607,11 +690,14 @@ fn post_file_open(body: &Option<Value>, app: &tauri::AppHandle) -> (u16, Value) 
         .as_ref()
         .and_then(|obj| obj.get("line"))
         .and_then(|v| v.as_u64());
-    let _ = app.emit(
-        "agent-ui",
+    let queued = emit_ui(
+        app,
         json!({ "action": "openFile", "path": path, "line": line }),
     );
-    (200, json!({"ok": true, "path": path, "line": line}))
+    (
+        200,
+        json!({"ok": true, "queued": queued, "path": path, "line": line}),
+    )
 }
 
 /// Machine-readable route list so agents can discover the API.
@@ -676,15 +762,15 @@ fn post_view(body: &Option<Value>, app: &tauri::AppHandle) -> (u16, Value) {
         return (400, json!({"error": "view is required"}));
     };
     let tab = obj.get("tab").and_then(|v| v.as_str());
-    let _ = app.emit(
-        "agent-ui",
+    let queued = emit_ui(
+        app,
         json!({
             "action": "setView",
             "view": view,
             "tab": tab
         }),
     );
-    (200, json!({"ok": true, "view": view}))
+    (200, json!({"ok": true, "queued": queued, "view": view}))
 }
 
 fn post_group_run(body: &Option<Value>, app: &tauri::AppHandle) -> (u16, Value) {
@@ -695,14 +781,14 @@ fn post_group_run(body: &Option<Value>, app: &tauri::AppHandle) -> (u16, Value) 
     let Some(name) = name else {
         return (400, json!({"error": "name is required"}));
     };
-    let _ = app.emit(
-        "agent-ui",
+    let queued = emit_ui(
+        app,
         json!({
             "action": "runGroup",
             "name": name
         }),
     );
-    (200, json!({"ok": true, "group": name}))
+    (200, json!({"ok": true, "queued": queued, "group": name}))
 }
 
 #[cfg(test)]

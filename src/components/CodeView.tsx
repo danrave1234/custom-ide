@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as api from "../api";
 import { highlightToLines } from "../highlight";
-import { changeMarks, fuzzyScore, type LineMark } from "../codeLines";
+import { changeMarks, containingRoot, fuzzyScore, type LineMark } from "../codeLines";
 import { ChevronDown, ChevronRight, Close, Copy, FileIcon, Folder, Refresh, Search } from "./Icons";
 import { useResizable } from "../useResizable";
 
@@ -22,6 +22,8 @@ interface Props {
   roots: CodeRoot[];
   initialRoot: string;
   explorerOpen: boolean;
+  /** false while the Dashboard is shown; the view stays mounted to keep its tabs */
+  visible: boolean;
   openRequest: OpenFileRequest | null;
   onError: (msg: string) => void;
 }
@@ -64,7 +66,7 @@ function statusLetter(f: { index_status: string; worktree_status: string }) {
   return s || "M";
 }
 
-export default function CodeView({ roots, initialRoot, explorerOpen, openRequest, onError }: Props) {
+export default function CodeView({ roots, initialRoot, explorerOpen, visible, openRequest, onError }: Props) {
   const [root, setRoot] = useState(initialRoot);
   const [explorerWidth, onExplorerResize] = useResizable("vd-explorer-w", 260, 180, 520);
   const [children, setChildren] = useState<Record<string, api.DirEntry[]>>({});
@@ -81,6 +83,8 @@ export default function CodeView({ roots, initialRoot, explorerOpen, openRequest
   const scrollRef = useRef<HTMLDivElement>(null);
   const barInputRef = useRef<HTMLInputElement>(null);
   const pendingLine = useRef<number | null>(null);
+  /** a file opened in another root, to reveal once that root's tree is loaded */
+  const pendingReveal = useRef<Tab | null>(null);
 
   const rootInfo = roots.find((r) => r.path === root);
   const activeTab = tabs.find((t) => tabKey(t) === activeKey) ?? null;
@@ -117,11 +121,28 @@ export default function CodeView({ roots, initialRoot, explorerOpen, openRequest
 
   useEffect(() => {
     setChildren({});
-    setExpanded(new Set());
+    const reveal = pendingReveal.current?.root === root ? parentDirs(pendingReveal.current.rel) : [];
+    pendingReveal.current = null;
+    setExpanded(new Set(reveal));
     void loadDir("", root);
+    reveal.forEach((d) => void loadDir(d, root));
     void loadGitStatus();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [root]);
+
+  // a different workspace was opened: browse it, and drop tabs from the old one
+  useEffect(() => {
+    if (!roots.length) return;
+    const known = new Set(roots.map((r) => r.path));
+    if (!known.has(root)) setRoot(known.has(initialRoot) ? initialRoot : roots[0].path);
+    setTabs((prev) => {
+      const next = prev.filter((t) => known.has(t.root));
+      if (next.length === prev.length) return prev;
+      setActiveKey((cur) => (next.some((t) => tabKey(t) === cur) ? cur : next.length ? tabKey(next[next.length - 1]) : null));
+      return next;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roots]);
 
   const refreshExplorer = useCallback(() => {
     void loadDir("");
@@ -131,9 +152,16 @@ export default function CodeView({ roots, initialRoot, explorerOpen, openRequest
 
   // agents change files behind our back; catch up whenever the window regains focus
   useEffect(() => {
+    if (!visible) return;
     window.addEventListener("focus", refreshExplorer);
     return () => window.removeEventListener("focus", refreshExplorer);
-  }, [refreshExplorer]);
+  }, [visible, refreshExplorer]);
+
+  // and when coming back from the Dashboard
+  useEffect(() => {
+    if (visible) refreshExplorer();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible]);
 
   const toggleDir = (rel: string) => {
     setExpanded((prev) => {
@@ -184,8 +212,9 @@ export default function CodeView({ roots, initialRoot, explorerOpen, openRequest
       setSelectedLine(line ?? null);
       pendingLine.current = line ?? null;
       void loadFile(tab);
-      // reveal it in the explorer
-      if (forRoot === root) {
+      // reveal it in the explorer (another root is revealed after it loads)
+      if (forRoot !== root) pendingReveal.current = tab;
+      else {
         const dirs = parentDirs(rel);
         setExpanded((prev) => new Set([...prev, ...dirs]));
         dirs.forEach((d) => {
@@ -208,21 +237,24 @@ export default function CodeView({ roots, initialRoot, explorerOpen, openRequest
     });
   };
 
-  // live-reload the visible file
+  // live-reload the visible file (each poll also runs `git diff`, so only while shown)
   useEffect(() => {
-    if (!activeTab || !active || active.binary || active.size > POLL_MAX_SIZE) return;
+    if (!visible || !activeTab || !active || active.binary || active.size > POLL_MAX_SIZE) return;
     const id = setInterval(() => void loadFile(activeTab, true), POLL_MS);
     return () => clearInterval(id);
-  }, [activeTab, active, loadFile]);
+  }, [visible, activeTab, active, loadFile]);
 
   // open requests from App (agent API, palette)
   useEffect(() => {
     if (!openRequest) return;
-    const target = norm(openRequest.path).toLowerCase();
-    const owner = [...roots]
-      .sort((a, b) => b.path.length - a.path.length)
-      .find((r) => target.startsWith(norm(r.path).toLowerCase() + "/"));
-    if (!owner) return onError(`${openRequest.path} is not inside the open workspace`);
+    const ownerPath = containingRoot(
+      roots.map((r) => r.path),
+      openRequest.path
+    );
+    const owner = roots.find((r) => r.path === ownerPath);
+    if (!owner || norm(owner.path).length >= norm(openRequest.path).length) {
+      return onError(`${openRequest.path} is not a file inside the open workspace`);
+    }
     const rel = norm(openRequest.path).slice(norm(owner.path).length + 1);
     if (owner.path !== root) setRoot(owner.path);
     openFile(rel, openRequest.line, owner.path);
@@ -288,8 +320,9 @@ export default function CodeView({ roots, initialRoot, explorerOpen, openRequest
     }
   };
 
-  // keyboard shortcuts while the code view is mounted
+  // keyboard shortcuts, only while the code view is on screen
   useEffect(() => {
+    if (!visible) return;
     const onKey = (e: KeyboardEvent) => {
       if ((e.target as HTMLElement)?.closest?.(".terminal-host")) return;
       if (!(e.ctrlKey || e.metaKey)) return;
@@ -307,7 +340,7 @@ export default function CodeView({ roots, initialRoot, explorerOpen, openRequest
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [active]);
+  }, [visible, active]);
 
   const copyLocation = () => {
     if (!activeTab) return;
@@ -497,7 +530,7 @@ export default function CodeView({ roots, initialRoot, explorerOpen, openRequest
         )}
       </section>
 
-      {quickOpen && (
+      {quickOpen && visible && (
         <QuickOpen
           root={root}
           onPick={(rel) => {

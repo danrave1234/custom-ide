@@ -91,3 +91,22 @@ export function fuzzyScore(path: string, query: string): number {
   }
   return score - p.length / 10;
 }
+
+/** `\` → `/`, no trailing slash, lower-cased: for comparing paths from different sources. */
+export function pathKey(p: string): string {
+  return p.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+}
+
+/**
+ * The deepest of `roots` that is `target` or contains it, comparing paths
+ * separator- and case-insensitively (paths arrive as `C:\x`, `C:/x`, `c:\x`).
+ */
+export function containingRoot(roots: string[], target: string): string | null {
+  const t = pathKey(target);
+  let best: string | null = null;
+  for (const r of roots) {
+    const k = pathKey(r);
+    if ((t === k || t.startsWith(k + "/")) && (!best || k.length > pathKey(best).length)) best = r;
+  }
+  return best;
+}

@@ -201,3 +201,6 @@ export const listDir = (root: string, rel: string) => invoke<DirEntry[]>("list_d
 export const readTextFile = (root: string, rel: string) =>
   invoke<FileContent>("read_text_file", { root, rel });
 export const listFiles = (root: string) => invoke<string[]>("list_files", { root });
+
+/** Tell the backend this window's agent-ui listener is live (flushes queued agent actions). */
+export const agentUiReady = () => invoke<void>("agent_ui_ready");

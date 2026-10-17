@@ -22,8 +22,12 @@ const THEME = {
   brightBlack: "#8a94a6",
 };
 
+/** Each mount gets its own backend PTY session id (see the effect below). */
+let mountCounter = 0;
+
 export default function TerminalPane({ id, cwd, command, visible }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
+  const sessionRef = useRef(id);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
 
@@ -51,15 +55,27 @@ export default function TerminalPane({ id, cwd, command, visible }: Props) {
       /* host not laid out yet */
     }
 
-    api.ptyOpen(id, cwd, term.rows, term.cols, command).catch(() => {});
+    // A fresh session id per mount, opened one tick later: React StrictMode
+    // mounts, unmounts and remounts immediately in dev. With a shared id the
+    // stale cleanup's pty_close could kill the live shell, and an eager open
+    // would type a launch command (e.g. `claude`) into a shell about to die.
+    const sid = `${id}#${++mountCounter}`;
+    sessionRef.current = sid;
+    let opened = false;
+    const openTimer = setTimeout(() => {
+      opened = true;
+      api.ptyOpen(sid, cwd, term.rows, term.cols, command).catch((e) => {
+        term.write(`\x1b[31mCould not start a shell: ${String(e)}\x1b[0m\r\n`);
+      });
+    }, 0);
 
-    const inputSub = term.onData((data) => api.ptyInput(id, data).catch(() => {}));
+    const inputSub = term.onData((data) => api.ptyInput(sid, data).catch(() => {}));
 
     const outputUnlisten = listen<{ id: string; data: string }>("pty-output", (e) => {
-      if (e.payload.id === id && !disposed) term.write(e.payload.data);
+      if (e.payload.id === sid && !disposed) term.write(e.payload.data);
     });
     const exitUnlisten = listen<{ id: string }>("pty-exit", (e) => {
-      if (e.payload.id === id && !disposed) {
+      if (e.payload.id === sid && !disposed) {
         term.write("\r\n\x1b[90m[process exited]\x1b[0m\r\n");
       }
     });
@@ -68,7 +84,7 @@ export default function TerminalPane({ id, cwd, command, visible }: Props) {
       if (disposed) return;
       try {
         fit.fit();
-        api.ptyResize(id, term.rows, term.cols).catch(() => {});
+        if (opened) api.ptyResize(sid, term.rows, term.cols).catch(() => {});
       } catch {
         /* ignore transient layout errors */
       }
@@ -81,7 +97,8 @@ export default function TerminalPane({ id, cwd, command, visible }: Props) {
       ro.disconnect();
       outputUnlisten.then((fn) => fn());
       exitUnlisten.then((fn) => fn());
-      api.ptyClose(id).catch(() => {});
+      clearTimeout(openTimer);
+      if (opened) api.ptyClose(sid).catch(() => {});
       term.dispose();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -95,7 +112,7 @@ export default function TerminalPane({ id, cwd, command, visible }: Props) {
         fitRef.current?.fit();
         const term = termRef.current;
         if (term) {
-          api.ptyResize(id, term.rows, term.cols).catch(() => {});
+          api.ptyResize(sessionRef.current, term.rows, term.cols).catch(() => {});
           term.focus();
         }
       } catch {

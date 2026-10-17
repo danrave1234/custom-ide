@@ -40,7 +40,10 @@ The folder keeps its original `vibedeck` identifier so existing installs keep th
 { "port": 17321, "token": "aBcDeFgHiJkLmNoPqRsTuVwX" }
 ```
 
-Overrides: `VIDE_AGENT_PORT`, `VIDE_AGENT_TOKEN` (the older `VIBEDECK_*` names still work).
+Environment variables `VIDE_AGENT_PORT` and `VIDE_AGENT_TOKEN` (the older `VIBEDECK_*` names still work):
+
+- **CLI side:** they replace what the CLI reads from `agent.json`.
+- **App side:** they are only used when the app *creates* `agent.json` on first launch. Once the file exists it wins, so to change the port or token later, edit `agent.json` and restart Vide. Setting `VIDE_AGENT_TOKEN` only for the CLI, with a different token in `agent.json`, gives `401 unauthorized`.
 
 ## CLI
 
@@ -119,6 +122,8 @@ To check a dev server, use `vide runs` and `vide output "<id>" --tail 80` instea
 ## HTTP API
 
 JSON in, JSON out. Header: `Authorization: Bearer <token>`. `GET /v1` returns this list in machine-readable form.
+
+Routes that act on the UI (open, select, view, run, stop, group run, terminal, notify, file open) answer `{"ok": true, "queued": false}` once the action has been handed to a window. If no window is listening yet (Vide is still starting, or the page is reloading) the action is held and replayed as soon as a window is ready, and the response says `"queued": true`. With several windows open, the action goes to the focused one.
 
 | Method | Path | Input | Does |
 |---|---|---|---|

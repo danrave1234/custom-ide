@@ -18,6 +18,7 @@ All notable changes to Vide (formerly VibeDeck) will be documented in this file.
 - The agent CLI looked for its token in the wrong folder, so authenticated commands failed unless `VIBEDECK_AGENT_TOKEN` was set.
 - `GET /v1/configs` ignored the `repo` query parameter the CLI sends and always returned 400.
 - `GET /v1/repos` returned a placeholder instead of the workspace's repositories.
+- Agent UI actions sent while the app was starting (or between internal listener refreshes) were dropped even though the API answered `ok`; they are now queued and replayed, and responses report `queued`. With several windows, an action now goes to one window instead of running in each.
 
 ## [0.5.0] - 2026-10-15
 
