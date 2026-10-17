@@ -1,5 +1,7 @@
 mod agent;
+mod agents;
 mod env_files;
+mod files;
 mod git;
 mod ports;
 mod pty;
@@ -20,7 +22,7 @@ fn new_window(app: tauri::AppHandle) -> Result<(), String> {
         format!("main-{n}"),
         tauri::WebviewUrl::App("index.html".into()),
     )
-    .title("VibeDeck")
+    .title("Vide")
     .inner_size(1360.0, 860.0)
     .min_inner_size(960.0, 600.0)
     .build()
@@ -28,7 +30,7 @@ fn new_window(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// Stop every dev server, file watcher and terminal VibeDeck started.
+/// Stop every dev server, file watcher and terminal Vide started.
 fn stop_child_processes(app: &tauri::AppHandle) {
     if let Some(pm) = app.try_state::<runs::ProcessManager>() {
         pm.kill_all();
@@ -100,6 +102,10 @@ pub fn run() {
             pty::pty_input,
             pty::pty_resize,
             pty::pty_close,
+            agents::detect_agent_clis,
+            files::list_dir,
+            files::read_text_file,
+            files::list_files,
         ])
         .setup(|app| {
             #[cfg(desktop)]
@@ -115,7 +121,7 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app_handle, event| {
-            // closing VibeDeck must not orphan the dev servers it started
+            // closing Vide must not orphan the dev servers it started
             if let tauri::RunEvent::Exit = event {
                 stop_child_processes(app_handle);
             }

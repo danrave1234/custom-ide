@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1e2433"/>
+      <stop offset="1" stop-color="#0b0e13"/>
+    </linearGradient>
+    <linearGradient id="v" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#d9d3ff"/>
+      <stop offset="0.55" stop-color="#9d8fff"/>
+      <stop offset="1" stop-color="#6a58f5"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.3" cy="0.25" r="0.8">
+      <stop offset="0" stop-color="#7c6cff" stop-opacity="0.28"/>
+      <stop offset="1" stop-color="#7c6cff" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect x="32" y="32" width="960" height="960" rx="216" fill="url(#bg)"/>
+  <rect x="32" y="32" width="960" height="960" rx="216" fill="url(#glow)"/>
+  <rect x="36" y="36" width="952" height="952" rx="212" fill="none" stroke="#ffffff" stroke-opacity="0.08" stroke-width="8"/>
+  <polyline points="256,296 468,712 680,296" fill="none" stroke="url(#v)" stroke-width="112" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="624" y="636" width="152" height="80" rx="40" fill="#4ade80"/>
+</svg>

@@ -45,6 +45,12 @@ jobs:
       - name: Test version tooling
         run: npm run test:version
 
+      - name: Test agent CLI
+        run: npm run test:cli
+
+      - name: Test code view helpers
+        run: npm run test:ui
+
       - name: Build frontend
         run: npm run build
 

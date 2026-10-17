@@ -16,7 +16,7 @@ fn git_command(repo: &str) -> Command {
     cmd
 }
 
-fn run_git(repo: &str, args: &[&str]) -> Result<String, String> {
+pub(crate) fn run_git(repo: &str, args: &[&str]) -> Result<String, String> {
     let output = git_command(repo)
         .args(args)
         .output()
@@ -66,7 +66,7 @@ pub struct RepoInfo {
     pub behind: u32,
 }
 
-const SKIP_DIRS: &[&str] = &[
+pub(crate) const SKIP_DIRS: &[&str] = &[
     "node_modules",
     "target",
     "dist",

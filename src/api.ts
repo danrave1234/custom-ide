@@ -57,7 +57,7 @@ export const newWindow = () => invoke<void>("new_window");
 
 /** Native yes/no dialog — window.confirm is unreliable inside the webview. */
 export const confirmAsk = (message: string) =>
-  ask(message, { title: "VibeDeck", kind: "warning" });
+  ask(message, { title: "Vide", kind: "warning" });
 
 export interface PortProcess {
   pid: number;
@@ -69,8 +69,18 @@ export interface PortProcess {
 export const portLookup = (port: number) => invoke<PortProcess[]>("port_lookup", { port });
 export const killPid = (pid: number) => invoke<void>("kill_pid", { pid });
 
-export const ptyOpen = (id: string, cwd: string, rows: number, cols: number) =>
-  invoke<void>("pty_open", { id, cwd, rows, cols });
+/** `command` is typed into the new shell, e.g. to launch a coding-agent CLI. */
+export const ptyOpen = (id: string, cwd: string, rows: number, cols: number, command?: string) =>
+  invoke<void>("pty_open", { id, cwd, rows, cols, command: command ?? null });
+
+export interface AgentCli {
+  id: string;
+  name: string;
+  command: string;
+  path: string;
+}
+
+export const detectAgentClis = () => invoke<AgentCli[]>("detect_agent_clis");
 export const ptyInput = (id: string, data: string) => invoke<void>("pty_input", { id, data });
 export const ptyResize = (id: string, rows: number, cols: number) =>
   invoke<void>("pty_resize", { id, rows, cols });
@@ -170,3 +180,24 @@ export const recordBuildInfo = (build: string) =>
     key: "buildinfo",
     value: JSON.stringify({ build, launchedAt: new Date().toISOString() }, null, 2),
   }).catch(() => {});
+
+export interface DirEntry {
+  name: string;
+  /** relative to the browsed root, `/`-separated */
+  path: string;
+  is_dir: boolean;
+  size: number;
+}
+
+export interface FileContent {
+  path: string;
+  content: string;
+  size: number;
+  binary: boolean;
+  truncated: boolean;
+}
+
+export const listDir = (root: string, rel: string) => invoke<DirEntry[]>("list_dir", { root, rel });
+export const readTextFile = (root: string, rel: string) =>
+  invoke<FileContent>("read_text_file", { root, rel });
+export const listFiles = (root: string) => invoke<string[]>("list_files", { root });

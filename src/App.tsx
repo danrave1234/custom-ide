@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import * as api from "./api";
 import type {
@@ -21,17 +21,31 @@ import RunView from "./components/RunView";
 import FavoritesView from "./components/FavoritesView";
 import SyncView from "./components/SyncView";
 import EnvView from "./components/EnvView";
-import BottomPanel from "./components/BottomPanel";
+import BottomPanel, { type TerminalRequest } from "./components/BottomPanel";
+import Logo from "./components/Logo";
+import type { CodeRoot, OpenFileRequest } from "./components/CodeView";
 import KillPortModal from "./components/KillPortModal";
 import CommandPalette, { type CommandItem } from "./components/CommandPalette";
 import UpdateNotice from "./components/UpdateNotice";
-import { Menu, ChevronDown, Close, Folder, Terminal as TerminalIcon } from "./components/Icons";
+import { Menu, ChevronDown, Close, Folder, Terminal as TerminalIcon, Code, Dashboard } from "./components/Icons";
+
+// the code view pulls in the syntax highlighter; load it only when first opened
+const CodeView = lazy(() => import("./components/CodeView"));
 import { useResizable } from "./useResizable";
 import { appendRunOutput } from "./outputBuffer";
 import { useUpdater } from "./useUpdater";
 import "./App.css";
 
 
+interface AgentNotice {
+  id: number;
+  title: string;
+  message: string;
+  level: "info" | "success" | "warning" | "error";
+  repo?: string;
+}
+
+type Mode = "dashboard" | "code";
 type Tab = "changes" | "branches" | "history" | "run" | "env";
 type View = "repo" | "favorites" | "sync";
 
@@ -65,6 +79,37 @@ export default function App() {
   const updater = useUpdater();
   const [moreOpen, setMoreOpen] = useState(false);
   const [bottomOpen, setBottomOpen] = useState(false);
+  const [agentClis, setAgentClis] = useState<api.AgentCli[]>([]);
+  const [terminalRequest, setTerminalRequest] = useState<TerminalRequest | null>(null);
+  const [notices, setNotices] = useState<AgentNotice[]>([]);
+  const [mode, setModeState] = useState<Mode>(() => (localStorage.getItem("vd-mode") === "code" ? "code" : "dashboard"));
+  const [openFileRequest, setOpenFileRequest] = useState<OpenFileRequest | null>(null);
+
+  const setMode = useCallback((next: Mode) => {
+    localStorage.setItem("vd-mode", next);
+    setModeState(next);
+  }, []);
+
+  const showFile = useCallback(
+    (path: string, line?: number) => {
+      setOpenFileRequest({ nonce: Date.now(), path, line });
+      setMode("code");
+    },
+    [setMode]
+  );
+
+  useEffect(() => {
+    api.detectAgentClis().then(setAgentClis).catch(() => {});
+  }, []);
+
+  const openTerminal = useCallback((cwd: string, title?: string, command?: string) => {
+    setTerminalRequest({ nonce: Date.now(), cwd, title, command });
+    setBottomOpen(true);
+  }, []);
+
+  const dismissNotice = useCallback((id: number) => {
+    setNotices((prev) => prev.filter((n) => n.id !== id));
+  }, []);
 
   const toggleBottom = () => setBottomOpen((v) => !v);
 
@@ -74,6 +119,14 @@ export default function App() {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
         setPaletteOpen(true);
+      }
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === "e") {
+        e.preventDefault();
+        setModeState((m) => {
+          const next = m === "code" ? "dashboard" : "code";
+          localStorage.setItem("vd-mode", next);
+          return next;
+        });
       }
       if (e.ctrlKey && e.key === "`") {
         e.preventDefault();
@@ -410,13 +463,39 @@ export default function App() {
           }
           break;
         }
+        case "openTerminal": {
+          if (payload.cwd) openTerminal(payload.cwd, payload.title ?? undefined, payload.command ?? undefined);
+          break;
+        }
+        case "notify": {
+          const notice: AgentNotice = {
+            id: Date.now() + Math.random(),
+            title: payload.title ?? "Agent",
+            message: payload.message ?? "",
+            level: payload.level ?? "info",
+            repo: payload.repo ?? undefined,
+          };
+          setNotices((prev) => [...prev.slice(-3), notice]);
+          // errors stay until dismissed; everything else fades out
+          if (notice.level !== "error") setTimeout(() => dismissNotice(notice.id), 8000);
+          break;
+        }
         case "stopRun": {
           if (payload.id) stopRun(payload.id);
           break;
         }
         case "setView": {
-          if (payload.view) setView(payload.view);
+          if (payload.view === "code") {
+            setMode("code");
+          } else {
+            if (payload.view) setView(payload.view);
+            if (payload.view || payload.tab) setMode("dashboard");
+          }
           if (payload.tab) setTab(payload.tab);
+          break;
+        }
+        case "openFile": {
+          if (payload.path) showFile(payload.path, payload.line ?? undefined);
           break;
         }
         case "runGroup": {
@@ -450,7 +529,7 @@ export default function App() {
     return () => {
       unlisten.then((fn) => fn());
     };
-  }, [openWorkspace, repos, startRun, stopRun, persisted, root, sessionsRef]);
+  }, [openWorkspace, repos, startRun, stopRun, persisted, root, sessionsRef, openTerminal, dismissNotice, setMode, showFile]);
 
   const clearRun = useCallback((id: string) => {
     const target = sessionsRef.current.find((s) => s.id === id);
@@ -638,6 +717,17 @@ export default function App() {
   }, {});
   const totalRunning = Object.values(runningByRepo).reduce((a, b) => a + b, 0);
 
+  const codeVisited = useCodeVisited(mode === "code");
+  const codeRoots: CodeRoot[] = useMemo(() => {
+    if (!root) return [];
+    const list: CodeRoot[] = repos.map((r) => ({ label: r.name, path: r.path, isRepo: true }));
+    if (!repos.some((r) => r.path === root)) {
+      const name = root.split(/[\\/]/).filter(Boolean).pop() ?? root;
+      list.unshift({ label: `${name} (workspace)`, path: root, isRepo: false });
+    }
+    return list;
+  }, [repos, root]);
+
   const repoSessions = sessions.filter((s) => s.repoPath === selectedRepo);
   const workspaceName = root ? root.split(/[\\/]/).filter(Boolean).pop() : null;
   const commandItems: CommandItem[] = root
@@ -681,6 +771,26 @@ export default function App() {
             }
           },
         })),
+        ...agentClis.map((agent) => {
+          const cwd = (view === "repo" && selectedRepo) || root;
+          const label = cwd.split(/[\/]/).filter(Boolean).pop() ?? "workspace";
+          return {
+            id: `agent-${agent.id}`,
+            label: `Launch ${agent.name}`,
+            detail: `in ${label} · ${agent.command}`,
+            group: "Agent",
+            keywords: "agent ai cli claude codex gemini terminal",
+            action: () => openTerminal(cwd, `${agent.name} · ${label}`, agent.command),
+          };
+        }),
+        {
+          id: "mode-toggle",
+          label: mode === "code" ? "Switch to Dashboard" : "Switch to Code view",
+          detail: "Ctrl+Shift+E",
+          group: "Navigate",
+          keywords: "explorer files editor source browse ide",
+          action: () => setMode(mode === "code" ? "dashboard" : "code"),
+        },
         {
           id: "action-terminal",
           label: bottomOpen ? "Hide bottom panel" : "Show bottom panel",
@@ -721,8 +831,9 @@ export default function App() {
   if (!root) {
     return (
       <div className="welcome">
-        <h1>VibeDeck</h1>
-        <p>Git branches, diffs and run configs for local development.</p>
+        <Logo size={72} />
+        <h1>Vide</h1>
+        <p>The IDE for vibe coding. Launch your agents, read the code, see what changed, run it.</p>
         <button className="primary-btn big" onClick={pickAndOpen}>
           Open workspace folder
         </button>
@@ -752,7 +863,29 @@ export default function App() {
         >
           <Menu size={16} />
         </button>
-        <span className="app-name">VibeDeck</span>
+        <span className="app-name">
+          <Logo size={18} /> Vide
+        </span>
+        <div className="mode-switch" role="tablist" aria-label="Layout">
+          <button
+            role="tab"
+            aria-selected={mode === "dashboard"}
+            className={mode === "dashboard" ? "active" : ""}
+            onClick={() => setMode("dashboard")}
+            title="Dashboard: changes, runs, favorites (Ctrl+Shift+E)"
+          >
+            <Dashboard size={13} /> Dashboard
+          </button>
+          <button
+            role="tab"
+            aria-selected={mode === "code"}
+            className={mode === "code" ? "active" : ""}
+            onClick={() => setMode("code")}
+            title="Code: browse files and read code (Ctrl+Shift+E)"
+          >
+            <Code size={13} /> Code
+          </button>
+        </div>
         <div className="workspace-switcher">
           <button
             className="workspace-name ws-button"
@@ -838,7 +971,7 @@ export default function App() {
                 <button onClick={() => { setMoreOpen(false); void api.newWindow().catch((e) => showError(String(e))); }}>New window</button>
                 <button onClick={() => { setMoreOpen(false); updater.checkNow(); }}>Check for updates…</button>
                 <div className="ws-divider" />
-                <div className="app-meta">VibeDeck v{__APP_VERSION__}<small>Built {__BUILD_TIME__}{lastSaved ? ` · saved ${lastSaved}` : ""}</small></div>
+                <div className="app-meta">Vide v{__APP_VERSION__}<small>Built {__BUILD_TIME__}{lastSaved ? ` · saved ${lastSaved}` : ""}</small></div>
               </div>
             </>
           )}
@@ -847,6 +980,37 @@ export default function App() {
       {paletteOpen && <CommandPalette items={commandItems} onClose={() => setPaletteOpen(false)} />}
       {killPortOpen && <KillPortModal onClose={() => setKillPortOpen(false)} />}
       <UpdateNotice updater={updater} runningCount={totalRunning} />
+      {notices.length > 0 && (
+        <div className="agent-notices" role="status" aria-live="polite">
+          {notices.map((n) => (
+            <div key={n.id} className={`agent-notice ${n.level}`}>
+              <div className="agent-notice-body">
+                <strong>{n.title}</strong>
+                <span>{n.message}</span>
+                {n.repo && (
+                  <button
+                    className="link-btn"
+                    onClick={() => {
+                      const found = repos.find((r) => r.path === n.repo);
+                      if (found) {
+                        setSelectedRepo(found.path);
+                        setView("repo");
+                        setTab("changes");
+                      }
+                      dismissNotice(n.id);
+                    }}
+                  >
+                    Review changes
+                  </button>
+                )}
+              </div>
+              <button className="icon-btn" title="Dismiss" onClick={() => dismissNotice(n.id)}>
+                <Close size={12} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
 
       {error && (
         <div className="error-bar">
@@ -857,7 +1021,20 @@ export default function App() {
         </div>
       )}
 
-      <div className="main">
+      {codeVisited && (
+        <div className="main" style={{ display: mode === "code" ? "flex" : "none" }}>
+          <Suspense fallback={<div className="config-hint" style={{ padding: 16 }}>Loading code view…</div>}>
+            <CodeView
+              roots={codeRoots}
+              initialRoot={selectedRepo ?? root}
+              explorerOpen={sidebarOpen}
+              openRequest={openFileRequest}
+              onError={showError}
+            />
+          </Suspense>
+        </div>
+      )}
+      <div className="main" style={{ display: mode === "code" ? "none" : "flex" }}>
         {sidebarOpen && (
           <>
             <Sidebar
@@ -963,6 +1140,7 @@ export default function App() {
                     onError={showError}
                     onSuccess={() => setError(null)}
                     onRepoChanged={refreshSelectedRepo}
+                    onOpenFile={showFile}
                   />
                 )}
                 {tab === "branches" && (
@@ -1018,6 +1196,8 @@ export default function App() {
         onClear={clearRun}
         onError={showError}
         defaultCwd={(view === "repo" && selectedRepo) || root}
+        agentClis={agentClis}
+        terminalRequest={terminalRequest}
         defaultLabel={
           view === "repo" && selectedRepo
             ? selectedRepo.split(/[\\/]/).filter(Boolean).pop() ?? "shell"
@@ -1026,4 +1206,13 @@ export default function App() {
       />
     </div>
   );
+}
+
+/** True once `active` has been true, so a lazily-loaded view stays mounted afterwards. */
+function useCodeVisited(active: boolean) {
+  const [visited, setVisited] = useState(active);
+  useEffect(() => {
+    if (active) setVisited(true);
+  }, [active]);
+  return visited || active;
 }

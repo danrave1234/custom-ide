@@ -124,7 +124,7 @@ export default function EnvView({ repoPath, onError, onSuccess }: Props) {
           )}
         </ul>
         <div className="config-hint env-note">
-          Saved straight to disk. These files are usually gitignored — VibeDeck shows values in
+          Saved straight to disk. These files are usually gitignored — Vide shows values in
           plain text, so mind who's looking over your shoulder.
         </div>
       </div>

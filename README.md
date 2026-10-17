@@ -1,11 +1,23 @@
-# ⚡ VibeDeck
+<p align="center">
+  <img src="assets/brand/vide-icon.svg" width="112" alt="Vide logo" />
+</p>
 
-A lightweight desktop app for AI-assisted ("vibe") coding: you don't write code in it — you **see what the AI changed and run your projects**. Think of it as the git panel + run configurations from IntelliJ, without the other 2 GB.
+# Vide
+
+**The IDE for vibe coding.** *Vide* = Vibe + IDE, and Latin for "see": see what your agents changed.
+
+Vide is a lightweight desktop IDE built around coding agents like Claude Code, Codex CLI and Gemini CLI. The agents write the code; you launch them, **browse and read the code, see what they changed, run your projects, and get pinged when an agent is done or needs you**. Think of it as IntelliJ's project view, git panel and run configurations, plus a seat for every agent, without the other 2 GB.
+
+*(Formerly VibeDeck.)*
 
 Built with **Tauri 2 + React + TypeScript** (uses the OS webview — no bundled Chromium).
 
 ## Features
 
+- **Code view.** Switch between **Dashboard** and **Code** in the top bar (`Ctrl+Shift+E`). Browse any repo in a file explorer with git status colors, open files in tabs with line numbers, syntax highlighting and green/red gutter marks for lines the agent changed. Files reload live as agents edit them. `Ctrl+P` opens a file by name, `Ctrl+F` finds in the file, `Ctrl+G` jumps to a line. The Changes tab has **Open in Code view** to jump from a diff to the full file. Read-only on purpose: agents write, you read.
+- **Launch coding agents.** The **+ Agent** menu in the bottom panel lists every agent CLI on your `PATH` (Claude Code, Codex, Gemini, Cursor Agent, Copilot, Aider, opencode, Amp, Goose, Qwen Code) and opens it in a terminal tab in the selected repo. Also in the `Ctrl+K` palette.
+- **Agent control API and `vide` CLI.** Agents can open workspaces, start/stop and tail dev servers, read git status and diffs, open terminals, and post notifications back to you. Hook recipes for Claude Code and Codex are in [`docs/agents.md`](docs/agents.md).
+- **Agent notifications.** `vide notify "done" --repo` pops a notice in the app with a one-click **Review changes** jump to that repo's diff.
 - **Workspace = folder of repos.** Open any folder; every git repository inside (up to 3 levels deep) shows up with its branch, dirty-file count, and ahead/behind markers. Filter and sort repos in the sidebar. Recent-workspace switcher in the top bar; multiple windows for multiple workspaces.
 - **Keyboard-first** — `Ctrl+K` command palette for repos, views, and actions; Ctrl+backtick toggles the terminal; `Ctrl+Enter` commits; every control is reachable by Tab with visible focus.
 - **Changes / Branches / History** — stage/unstage/discard, colored unified diffs, commit; switch/create/delete branches, fetch/pull/push; commit log with full diffs.
@@ -33,7 +45,7 @@ CI checks synchronized versions, version-tool tests, the frontend production bui
 
 ## Versioning and releases
 
-VibeDeck uses [Semantic Versioning](https://semver.org/). The version is kept in sync across npm, Tauri, and Cargo metadata by one command:
+Vide uses [Semantic Versioning](https://semver.org/). The version is kept in sync across npm, Tauri, and Cargo metadata by one command:
 
 ```sh
 npm run version:set -- 0.2.0
@@ -64,3 +76,7 @@ See [`ROADMAP.md`](ROADMAP.md) for the prioritized product and engineering impro
 - `src-tauri/src/git.rs` — git CLI wrappers (status, branches, diffs, commits, sync)
 - `src-tauri/src/runs.rs` — run-config detection + process spawn/stream/kill
 - `src-tauri/src/store.rs` — JSON persistence for workspace + saved run configs
+- `src-tauri/src/agent.rs` — localhost agent HTTP API; `src-tauri/src/agents.rs` — agent CLI detection
+- `src/components/CodeView.tsx` — explorer + code viewer; `src-tauri/src/files.rs` — sandboxed directory listing and file reads
+- `scripts/agent.mjs` — the `vide` CLI (`npm link` to install it)
+- `assets/brand/` — logo source (`npx tauri icon assets/brand/vide-icon.svg` regenerates the app icons)

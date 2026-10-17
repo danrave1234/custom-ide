@@ -1,4 +1,4 @@
-# VibeDeck roadmap
+# Vide roadmap
 
 This is a prioritized set of improvements rather than a promise of dates. Reliability and safe distribution should come before adding more surface area.
 

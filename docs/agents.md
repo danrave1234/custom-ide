@@ -1,162 +1,156 @@
-# Agent Control
+# Vide for coding agents
 
-VibeDeck exposes a **localhost-only HTTP API** that lets external agents (coding agents, CLI scripts, ChatGPT local tools) control the app: open workspaces, select repos, start/stop runs, read output, and switch views.
+Vide is built to sit next to coding-agent CLIs (Claude Code, Codex CLI, Gemini CLI, Cursor Agent, Copilot CLI, Aider, opencode, Amp, Goose, Qwen Code). The agents write the code; Vide is where you read it, review the diffs, run the stack, and get told when an agent needs you.
 
-## Prerequisites
+There are three ways agents and Vide work together:
 
-- VibeDeck must be **running** (the API is embedded in the desktop app).
-- The API binds to `127.0.0.1:17321` by default — it is **not accessible from other machines**.
-- All endpoints except `/health` require a bearer token (auto-generated on first launch).
+1. **Launch agents from Vide.** The bottom panel has a **+ Agent** menu listing every agent CLI found on your `PATH`. Picking one opens a terminal tab in the selected repo and starts the agent there. The command palette (`Ctrl+K`) has a "Launch …" entry for each one too.
+2. **Let agents drive Vide.** A localhost-only HTTP API (and the `vide` CLI wrapping it) lets an agent open workspaces, start/stop dev servers, read their output, check git status and diffs, and open terminals.
+3. **Let agents tap you on the shoulder.** `vide notify` shows a notification in the app, with a **Review changes** button that jumps to the repo's diff. Wire it into your agent's hooks so you know the moment a run finishes or the agent is waiting on you.
 
-## Finding Your Token
+## Setup
 
-The token is stored in the app config directory:
+- Vide must be **running**; the API is embedded in the desktop app.
+- The API binds to `127.0.0.1:17321` and is **not reachable from other machines**.
+- Every endpoint except `/health` needs the bearer token that the app generates on first launch.
+
+### Install the CLI
+
+From a checkout of this repo:
+
+```bash
+npm link
+```
+
+That puts `vide` on your `PATH`. Without linking, use `npm run agent -- <command>` from the repo.
+
+### Token
+
+The CLI finds the token automatically. It lives in the app config directory:
 
 | Platform | Path |
 |----------|------|
-| Windows | `%LOCALAPPDATA%\vibedeck\agent.json` |
-| macOS | `~/Library/Application Support/vibedeck/agent.json` |
-| Linux | `~/.config/vibedeck/agent.json` |
+| Windows | `%APPDATA%\com.danrave.vibedeck\agent.json` |
+| macOS | `~/Library/Application Support/com.danrave.vibedeck/agent.json` |
+| Linux | `$XDG_CONFIG_HOME/com.danrave.vibedeck/agent.json` (default `~/.config/...`) |
 
-The file contains:
+The folder keeps its original `vibedeck` identifier so existing installs keep their settings.
+
 ```json
-{
-  "port": 17321,
-  "token": "aBcDeFgHiJkLmNoPqRsTuVwX"
-}
+{ "port": 17321, "token": "aBcDeFgHiJkLmNoPqRsTuVwX" }
 ```
 
-You can also override via environment variables:
-- `VIBEDECK_AGENT_PORT` — change the port
-- `VIBEDECK_AGENT_TOKEN` — set a custom token
+Overrides: `VIDE_AGENT_PORT`, `VIDE_AGENT_TOKEN` (the older `VIBEDECK_*` names still work).
 
-## CLI Usage
+## CLI
 
-The easiest way for agents to control VibeDeck is the built-in CLI:
+Every command prints JSON. Exit code `0` is success, `1` is a request error, `2` means Vide is not running.
 
 ```bash
-# Check if VibeDeck is running
-npm run agent -- health
+vide health                         # is the app up? (no token needed)
+vide describe                       # machine-readable route list
 
-# Get current status
-npm run agent -- status
+vide open "C:\projects\my-monorepo" # open a workspace
+vide repos                          # repos in the open workspace
+vide select "my-app"                # select a repo in the sidebar
+vide view repo --tab changes        # switch view (or: vide view code)
+vide show src/App.tsx:42            # open a file in the Code view at line 42
 
-# Open a workspace
-npm run agent -- open "C:\projects\my-monorepo"
+vide git-status                     # defaults to the current directory
+vide diff --file src/App.tsx        # working-tree diff (add --staged for the index)
 
-# Select a repo by name
-npm run agent -- select "my-app"
+vide configs "C:\projects\my-app"   # detected run configs
+vide run --name dev --command "npm run dev" --cwd "C:\projects\my-app"
+vide runs                           # running session ids
+vide output "C:\projects\my-app::dev" --tail 50
+vide stop "C:\projects\my-app::dev"
+vide group-run "Backend"            # run a favorites group
 
-# List detected run configs
-npm run agent -- configs "C:\projects\my-app"
-
-# Start a run
-npm run agent -- run --name "dev" --command "npm run dev" --cwd "C:\projects\my-app"
-
-# Stop a run
-npm run agent -- stop "C:\projects\my-app::dev"
-
-# List running sessions
-npm run agent -- runs
-
-# Get run output (last 100 lines)
-npm run agent -- output "C:\projects\my-app::dev" --tail 50
-
-# Switch view
-npm run agent -- view favorites
-npm run agent -- view repo --tab run
-
-# Run a favorites group
-npm run agent -- group-run "Backend"
+vide agents                         # agent CLIs found on PATH
+vide launch claude                  # new terminal tab running Claude Code here
+vide launch codex --cwd ../api
+vide terminal --command "npm test"  # new terminal tab running any command
+vide notify "Refactor done, tests green" --level success --repo
 ```
 
-## HTTP API Reference
+`--repo` with no value on `notify` means "the current directory", so the notification's **Review changes** button opens this repo.
 
-All endpoints use JSON request/response bodies. Auth header: `Authorization: Bearer <token>`.
+## Hook recipes
 
-### `GET /health`
-No auth required. Returns `{"status": "ok"}`.
+### Claude Code
 
-### `GET /v1/status`
-Returns current workspace root and persisted state.
+Add to `.claude/settings.json` (project) or `~/.claude/settings.json` (everywhere):
 
-### `POST /v1/workspace/open`
-```json
-{ "path": "C:\\projects\\my-monorepo" }
-```
-Scans and opens the workspace folder.
-
-### `GET /v1/repos`
-Returns list of scanned repos.
-
-### `POST /v1/repo/select`
-```json
-{ "path": "C:\\projects\\my-app" }
-// or
-{ "name": "my-app" }
-```
-Selects a repo in the sidebar.
-
-### `GET /v1/configs?repo=<path>`
-Lists detected run configs for a repo.
-
-### `POST /v1/run`
 ```json
 {
-  "name": "dev",
-  "command": "npm run dev",
-  "cwd": "C:\\projects\\my-app",
-  "repoPath": "C:\\projects\\my-app"
+  "hooks": {
+    "Stop": [
+      { "hooks": [{ "type": "command", "command": "vide notify \"Claude finished\" --title \"Claude Code\" --level success --repo" }] }
+    ],
+    "Notification": [
+      { "hooks": [{ "type": "command", "command": "vide notify \"Claude is waiting for you\" --title \"Claude Code\" --level warning --repo" }] }
+    ]
+  }
 }
 ```
-Starts a run session. Returns session `id`.
 
-### `POST /v1/run/stop`
-```json
-{ "id": "C:\\projects\\my-app::dev" }
+Hooks run in the project directory, so `--repo` points at the right repository.
+
+### Codex CLI
+
+Codex runs a program after each turn via `notify` in `~/.codex/config.toml`:
+
+```toml
+notify = ["vide", "notify", "--message", "Codex turn finished", "--title", "Codex", "--level", "success", "--repo", "."]
 ```
-Stops a running session.
 
-### `GET /v1/runs`
-Lists all currently running session IDs.
+Codex appends a JSON payload as the last argument; keeping every value behind a flag means the CLI ignores it.
 
-### `GET /v1/runs/output?id=<id>&tail=<N>`
-Returns the last N lines of output for a session.
+### Anything else
 
-### `POST /v1/view`
-```json
-{ "view": "favorites" }
-// or
-{ "view": "repo", "tab": "run" }
+Any agent that can run a shell command at the end of a task can call `vide notify`. Agents without hooks can be told in their instructions file (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`):
+
+```md
+When you finish a task, run `vide notify "<one-line summary>" --level success --repo`.
+To point me at code, run `vide show <file>:<line>`.
+To check a dev server, use `vide runs` and `vide output "<id>" --tail 80` instead of starting a second copy.
 ```
-Switches the current view/tab.
 
-### `POST /v1/group/run`
-```json
-{ "name": "Backend" }
+## HTTP API
+
+JSON in, JSON out. Header: `Authorization: Bearer <token>`. `GET /v1` returns this list in machine-readable form.
+
+| Method | Path | Input | Does |
+|---|---|---|---|
+| GET | `/health` | | `{"status":"ok","app":"vide"}`, no auth |
+| GET | `/v1` | | Route list |
+| GET | `/v1/status` | | Workspace root and persisted state |
+| GET | `/v1/repos` | | Repos in the open workspace |
+| POST | `/v1/workspace/open` | `{ path }` | Open a workspace folder |
+| POST | `/v1/repo/select` | `{ path }` or `{ name }` | Select a repo |
+| POST | `/v1/view` | `{ view, tab? }` | Switch view (`repo`/`favorites`/`sync`/`code`) and tab |
+| POST | `/v1/file/open` | `{ path, line? }` | Open a file (absolute path) in the Code view at a line |
+| GET | `/v1/git/status` | `?repo=` | Branch, ahead/behind, changed files |
+| GET | `/v1/git/diff` | `?repo=&file=&staged=` | Unified diff |
+| GET | `/v1/configs` | `?repo=` | Detected run configs |
+| POST | `/v1/run` | `{ name, command, cwd, repoPath? }` | Start a run; returns its `id` |
+| POST | `/v1/run/stop` | `{ id }` | Stop a run |
+| GET | `/v1/runs` | | Running session ids |
+| GET | `/v1/runs/output` | `?id=&tail=` | Last N output lines |
+| POST | `/v1/group/run` | `{ name }` | Run a favorites group |
+| GET | `/v1/agents` | | Agent CLIs found on `PATH` |
+| POST | `/v1/terminal/open` | `{ cwd, agent?, command?, title? }` | Open a terminal tab, optionally launching an agent or command |
+| POST | `/v1/notify` | `{ message, title?, level?, repo? }` | Show a notification (`info`/`success`/`warning`/`error`) |
+
+```bash
+curl -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+     -d '{"message":"Build is green","level":"success"}' \
+     http://127.0.0.1:17321/v1/notify
 ```
-Runs all items in a favorites group sequentially.
 
-## Using from ChatGPT / Coding Agents
+## Limits
 
-For local coding agents (Claude Desktop, ChatGPT local mode, Cursor, etc.):
-
-1. **Find the token** from `agent.json` in your app config directory.
-2. **Use curl or fetch** to call the API:
-   ```bash
-   curl -H "Authorization: Bearer YOUR_TOKEN" \
-        -H "Content-Type: application/json" \
-        -d '{"path": "C:\\projects\\my-app"}' \
-        http://127.0.0.1:17321/v1/workspace/open
-   ```
-3. **Or use the CLI** from your agent's terminal tool:
-   ```bash
-   VIBEDECK_AGENT_TOKEN=YOUR_TOKEN npm run agent -- open "C:\projects\my-app"
-   ```
-
-## Limitations
-
-- **Localhost only**: Remote agents (cloud ChatGPT) cannot reach the API directly. A local bridge process is needed.
-- **App must be running**: The API is embedded in the VibeDeck desktop app.
-- **Read-only git**: The agent API currently controls runs and navigation; git operations (commit, push) are not exposed yet.
-- **No PTY control**: Terminal input is not exposed via the agent API.
+- **Localhost only.** Cloud agents need a local bridge to reach the API.
+- **The app must be running.**
+- **Git is read-only over the API.** Agents can read status and diffs; committing and pushing stay with you (or the agent's own git).
+- **No terminal input over the API.** Terminals opened via the API are for you to watch and type into.

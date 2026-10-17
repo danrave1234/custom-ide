@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::fs;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -62,6 +62,14 @@ fn random_token(len: usize) -> String {
         .collect()
 }
 
+/// First set environment variable among `names` (new VIDE_* names win over
+/// the legacy VIBEDECK_* ones).
+fn env_any(names: &[&str]) -> Option<String> {
+    names
+        .iter()
+        .find_map(|n| std::env::var(n).ok().filter(|v| !v.is_empty()))
+}
+
 /// Shared state between the HTTP server thread and Tauri commands.
 pub struct AgentState {
     config: Mutex<Option<AgentConfig>>,
@@ -92,21 +100,13 @@ impl AgentState {
                 }
             }
         }
-        let mut cfg = AgentConfig {
-            port: std::env::var("VIBEDECK_AGENT_PORT")
-                .ok()
+        let cfg = AgentConfig {
+            port: env_any(&["VIDE_AGENT_PORT", "VIBEDECK_AGENT_PORT"])
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(DEFAULT_PORT),
-            token: std::env::var("VIBEDECK_AGENT_TOKEN")
-                .ok()
+            token: env_any(&["VIDE_AGENT_TOKEN", "VIBEDECK_AGENT_TOKEN"])
                 .unwrap_or_else(|| random_token(TOKEN_LEN)),
         };
-        // Allow env to override port
-        if let Ok(port_str) = std::env::var("VIBEDECK_AGENT_PORT") {
-            if let Ok(port) = port_str.parse() {
-                cfg.port = port;
-            }
-        }
         if let Ok(dir) = Self::config_dir(app) {
             let path = dir.join("agent.json");
             let _ = fs::write(
@@ -236,18 +236,9 @@ fn handle_connection(stream: TcpStream, app: &tauri::AppHandle, state: &AgentSta
     }
 
     // Read body
-    let mut body = vec![0u8; content_length];
-    if content_length > 0 {
-        use std::io::Read;
-        if reader
-            .by_ref()
-            .take(content_length as u64)
-            .read_to_end(&mut body)
-            .is_err()
-        {
-            return;
-        }
-    }
+    let Some(body) = read_body(&mut reader, content_length) else {
+        return;
+    };
     let body_str = String::from_utf8_lossy(&body).to_string();
     let body_json: Option<Value> = if content_length > 0 {
         serde_json::from_str(&body_str).ok()
@@ -276,22 +267,43 @@ fn handle_connection(stream: TcpStream, app: &tauri::AppHandle, state: &AgentSta
 
     // Route
     let (status, body) = match (method, path) {
-        ("GET", "/health") => (200, json!({"status": "ok"})),
+        ("GET", "/health") => (200, json!({"status": "ok", "app": "vide"})),
+        ("GET", "/v1") => (200, describe()),
         ("GET", "/v1/status") => get_status(app),
         ("POST", "/v1/workspace/open") => post_workspace_open(&body_json, app),
         ("GET", "/v1/repos") => get_repos(app),
         ("POST", "/v1/repo/select") => post_repo_select(&body_json, app),
-        ("GET", "/v1/configs") => get_configs(app, &body_json),
+        ("GET", "/v1/configs") => get_configs(query, &body_json),
         ("POST", "/v1/run") => post_run(&body_json, app),
         ("POST", "/v1/run/stop") => post_run_stop(&body_json, app),
         ("GET", "/v1/runs") => get_runs(app),
         ("GET", "/v1/runs/output") => get_runs_output(query, state),
         ("POST", "/v1/view") => post_view(&body_json, app),
         ("POST", "/v1/group/run") => post_group_run(&body_json, app),
+        ("GET", "/v1/git/status") => get_git_status(query),
+        ("GET", "/v1/git/diff") => get_git_diff(query),
+        ("GET", "/v1/agents") => (200, json!({"agents": super::agents::detect_agent_clis()})),
+        ("POST", "/v1/terminal/open") => post_terminal_open(&body_json, app),
+        ("POST", "/v1/notify") => post_notify(&body_json, app),
+        ("POST", "/v1/file/open") => post_file_open(&body_json, app),
         _ => (404, json!({"error": "not found"})),
     };
 
     send_response(stream, status, &body);
+}
+
+/// Largest request body the API accepts; every route takes a small JSON object.
+const MAX_BODY: usize = 1 << 20;
+
+/// Read exactly `len` body bytes. `read_to_end` appends, so the buffer must
+/// start empty rather than pre-sized with zeros.
+fn read_body(reader: &mut impl std::io::Read, len: usize) -> Option<Vec<u8>> {
+    if len > MAX_BODY {
+        return None;
+    }
+    let mut body = Vec::with_capacity(len);
+    reader.take(len as u64).read_to_end(&mut body).ok()?;
+    Some(body)
 }
 
 fn send_response(mut stream: TcpStream, status: u16, body: &Value) {
@@ -353,10 +365,15 @@ fn post_workspace_open(body: &Option<Value>, app: &tauri::AppHandle) -> (u16, Va
 }
 
 fn get_repos(app: &tauri::AppHandle) -> (u16, Value) {
-    // Return repos from the current state — the frontend will have them
-    // For now, emit a request event
-    let _ = app.emit("agent-ui", json!({"action": "getRepos"}));
-    (200, json!({"note": "repos available via frontend state"}))
+    let (_, status) = get_status(app);
+    let root = status.get("root").and_then(|v| v.as_str()).unwrap_or("");
+    if root.is_empty() {
+        return (200, json!({"root": null, "repos": []}));
+    }
+    match super::git::scan_repos(root.to_string()) {
+        Ok(repos) => (200, json!({"root": root, "repos": repos})),
+        Err(e) => (500, json!({"error": e})),
+    }
 }
 
 fn post_repo_select(body: &Option<Value>, app: &tauri::AppHandle) -> (u16, Value) {
@@ -382,15 +399,18 @@ fn post_repo_select(body: &Option<Value>, app: &tauri::AppHandle) -> (u16, Value
     (200, json!({"ok": true, "path": path_or_name}))
 }
 
-fn get_configs(_app: &tauri::AppHandle, body: &Option<Value>) -> (u16, Value) {
-    let repo = match body {
-        Some(obj) => obj.get("repo").and_then(|v| v.as_str()),
-        None => None,
-    };
+fn get_configs(query: &str, body: &Option<Value>) -> (u16, Value) {
+    // GET clients send `?repo=`; older callers put it in a JSON body
+    let repo = query_param(query, "repo").or_else(|| {
+        body.as_ref()
+            .and_then(|obj| obj.get("repo"))
+            .and_then(|v| v.as_str())
+            .map(str::to_string)
+    });
     let Some(repo_path) = repo else {
         return (400, json!({"error": "repo is required"}));
     };
-    match super::runs::detect_run_configs(repo_path.to_string()) {
+    match super::runs::detect_run_configs(repo_path) {
         Ok(configs) => (200, json!({"configs": configs})),
         Err(e) => (500, json!({"error": e})),
     }
@@ -467,27 +487,159 @@ fn get_runs(app: &tauri::AppHandle) -> (u16, Value) {
 }
 
 fn get_runs_output(query: &str, state: &AgentState) -> (u16, Value) {
-    // Parse query string for id and tail
-    let mut id: Option<String> = None;
-    let mut tail: usize = 100;
-    for param in query.split('&') {
-        if let Some((k, v)) = param.split_once('=') {
-            match k {
-                "id" => id = Some(url_decode(v)),
-                "tail" => {
-                    if let Ok(n) = v.parse() {
-                        tail = n;
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
+    let id = query_param(query, "id");
+    let tail: usize = query_param(query, "tail")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(100);
     let Some(id) = id else {
         return (400, json!({"error": "id query param is required"}));
     };
     let lines = state.get_output(&id, tail);
     (200, json!({"id": id, "lines": lines}))
+}
+
+/// Decoded value of `key` in a `a=1&b=2` query string.
+fn query_param(query: &str, key: &str) -> Option<String> {
+    query.split('&').find_map(|param| {
+        let (k, v) = param.split_once('=')?;
+        (k == key).then(|| url_decode(v))
+    })
+}
+
+fn get_git_status(query: &str) -> (u16, Value) {
+    let Some(repo) = query_param(query, "repo") else {
+        return (400, json!({"error": "repo query param is required"}));
+    };
+    match super::git::repo_status(repo) {
+        Ok(status) => (200, json!(status)),
+        Err(e) => (500, json!({"error": e})),
+    }
+}
+
+fn get_git_diff(query: &str) -> (u16, Value) {
+    let Some(repo) = query_param(query, "repo") else {
+        return (400, json!({"error": "repo query param is required"}));
+    };
+    let file = query_param(query, "file");
+    let staged = query_param(query, "staged").is_some_and(|v| v == "1" || v == "true");
+    match super::git::get_diff(repo, file, staged, false) {
+        Ok(diff) => (200, json!({"diff": diff})),
+        Err(e) => (500, json!({"error": e})),
+    }
+}
+
+fn post_terminal_open(body: &Option<Value>, app: &tauri::AppHandle) -> (u16, Value) {
+    let Some(obj) = body else {
+        return (400, json!({"error": "body required: cwd"}));
+    };
+    let str_field = |k: &str| obj.get(k).and_then(|v| v.as_str()).map(str::to_string);
+    let Some(cwd) = str_field("cwd") else {
+        return (400, json!({"error": "cwd is required"}));
+    };
+    // `agent` resolves a known coding-agent CLI id (claude, codex, ...) to its command
+    let agent = str_field("agent");
+    let command = match (&agent, str_field("command")) {
+        (_, Some(c)) => Some(c),
+        (Some(id), None) => match super::agents::detect_agent_clis()
+            .into_iter()
+            .find(|a| &a.id == id)
+        {
+            Some(a) => Some(a.command),
+            None => {
+                return (
+                    404,
+                    json!({"error": format!("agent CLI '{id}' not found on PATH")}),
+                )
+            }
+        },
+        (None, None) => None,
+    };
+    let title = str_field("title").or_else(|| agent.clone());
+    let _ = app.emit(
+        "agent-ui",
+        json!({
+            "action": "openTerminal",
+            "cwd": cwd,
+            "command": command,
+            "title": title
+        }),
+    );
+    (200, json!({"ok": true, "cwd": cwd, "command": command}))
+}
+
+fn post_notify(body: &Option<Value>, app: &tauri::AppHandle) -> (u16, Value) {
+    let Some(obj) = body else {
+        return (400, json!({"error": "body required: message"}));
+    };
+    let field = |k: &str| obj.get(k).and_then(|v| v.as_str());
+    let Some(message) = field("message") else {
+        return (400, json!({"error": "message is required"}));
+    };
+    let level = match field("level") {
+        Some(l @ ("info" | "success" | "warning" | "error")) => l,
+        _ => "info",
+    };
+    let _ = app.emit(
+        "agent-ui",
+        json!({
+            "action": "notify",
+            "title": field("title").unwrap_or("Agent"),
+            "message": message,
+            "level": level,
+            "repo": field("repo")
+        }),
+    );
+    (200, json!({"ok": true}))
+}
+
+fn post_file_open(body: &Option<Value>, app: &tauri::AppHandle) -> (u16, Value) {
+    let path = body
+        .as_ref()
+        .and_then(|obj| obj.get("path"))
+        .and_then(|v| v.as_str());
+    let Some(path) = path else {
+        return (400, json!({"error": "path is required"}));
+    };
+    if !std::path::Path::new(path).is_file() {
+        return (404, json!({"error": format!("{path} is not a file")}));
+    }
+    let line = body
+        .as_ref()
+        .and_then(|obj| obj.get("line"))
+        .and_then(|v| v.as_u64());
+    let _ = app.emit(
+        "agent-ui",
+        json!({ "action": "openFile", "path": path, "line": line }),
+    );
+    (200, json!({"ok": true, "path": path, "line": line}))
+}
+
+/// Machine-readable route list so agents can discover the API.
+fn describe() -> Value {
+    json!({
+        "app": "vide",
+        "auth": "Authorization: Bearer <token from agent.json>",
+        "routes": [
+            {"method": "GET", "path": "/health", "auth": false},
+            {"method": "GET", "path": "/v1/status"},
+            {"method": "GET", "path": "/v1/repos"},
+            {"method": "POST", "path": "/v1/workspace/open", "body": {"path": "string"}},
+            {"method": "POST", "path": "/v1/repo/select", "body": {"path|name": "string"}},
+            {"method": "GET", "path": "/v1/configs", "query": {"repo": "path"}},
+            {"method": "POST", "path": "/v1/run", "body": {"name": "string", "command": "string", "cwd": "path", "repoPath": "path?"}},
+            {"method": "POST", "path": "/v1/run/stop", "body": {"id": "string"}},
+            {"method": "GET", "path": "/v1/runs"},
+            {"method": "GET", "path": "/v1/runs/output", "query": {"id": "string", "tail": "number?"}},
+            {"method": "POST", "path": "/v1/view", "body": {"view": "repo|favorites|sync|code", "tab": "changes|branches|history|run|env?"}},
+            {"method": "POST", "path": "/v1/file/open", "body": {"path": "absolute file path", "line": "number?"}},
+            {"method": "POST", "path": "/v1/group/run", "body": {"name": "string"}},
+            {"method": "GET", "path": "/v1/git/status", "query": {"repo": "path"}},
+            {"method": "GET", "path": "/v1/git/diff", "query": {"repo": "path", "file": "string?", "staged": "bool?"}},
+            {"method": "GET", "path": "/v1/agents"},
+            {"method": "POST", "path": "/v1/terminal/open", "body": {"cwd": "path", "agent": "claude|codex|...?", "command": "string?", "title": "string?"}},
+            {"method": "POST", "path": "/v1/notify", "body": {"message": "string", "title": "string?", "level": "info|success|warning|error?", "repo": "path?"}}
+        ]
+    })
 }
 
 /// Minimal URL percent-decoder for ASCII.
@@ -551,4 +703,51 @@ fn post_group_run(body: &Option<Value>, app: &tauri::AppHandle) -> (u16, Value) 
         }),
     );
     (200, json!({"ok": true, "group": name}))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn read_body_returns_only_the_body_bytes() {
+        let mut input: &[u8] = b"{\"path\":\"x\"}trailing";
+        let body = read_body(&mut input, 12).unwrap();
+        assert_eq!(body, b"{\"path\":\"x\"}");
+        let parsed: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(parsed["path"], "x");
+    }
+
+    #[test]
+    fn read_body_rejects_oversized_bodies() {
+        let mut input: &[u8] = b"";
+        assert!(read_body(&mut input, MAX_BODY + 1).is_none());
+    }
+
+    #[test]
+    fn query_param_decodes_values() {
+        let q = "repo=C%3A%5Cprojects%5Capp&tail=50";
+        assert_eq!(query_param(q, "repo").as_deref(), Some("C:\\projects\\app"));
+        assert_eq!(query_param(q, "tail").as_deref(), Some("50"));
+        assert_eq!(query_param(q, "missing"), None);
+    }
+
+    #[test]
+    fn describe_lists_every_routed_path() {
+        let paths: Vec<String> = describe()["routes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| r["path"].as_str().unwrap().to_string())
+            .collect();
+        for p in [
+            "/v1/notify",
+            "/v1/terminal/open",
+            "/v1/git/diff",
+            "/v1/agents",
+            "/v1/file/open",
+        ] {
+            assert!(paths.iter().any(|x| x == p), "{p} missing from describe()");
+        }
+    }
 }

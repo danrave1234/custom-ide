@@ -1,3 +1,4 @@
+import { changeMarks } from "../codeLines";
 import { useCallback, useEffect, useState } from "react";
 import * as api from "../api";
 import { confirmAsk } from "../api";
@@ -10,6 +11,8 @@ interface Props {
   onError: (msg: string) => void;
   onSuccess?: () => void;
   onRepoChanged: () => void;
+  /** open the working-tree file in the code view (absolute path, 1-based line) */
+  onOpenFile?: (path: string, line?: number) => void;
 }
 
 interface SelectedFile {
@@ -20,7 +23,7 @@ interface SelectedFile {
 const statusLabel = (code: string) =>
   ({ M: "M", A: "A", D: "D", R: "R", C: "C", U: "U", "?": "U" }[code] ?? code);
 
-export default function ChangesView({ repoPath, onError, onSuccess, onRepoChanged }: Props) {
+export default function ChangesView({ repoPath, onError, onSuccess, onRepoChanged, onOpenFile }: Props) {
   const [status, setStatus] = useState<RepoStatus | null>(null);
   const [selected, setSelected] = useState<SelectedFile | null>(null);
   const [patch, setPatch] = useState("");
@@ -190,6 +193,21 @@ export default function ChangesView({ repoPath, onError, onSuccess, onRepoChange
       </div>
       <div className="resizer" onMouseDown={onPanelResize} />
       <div className="changes-diff">
+        {selected && onOpenFile && selected.file.worktree_status !== "D" && selected.file.index_status !== "D" && (
+          <div className="diff-open-bar">
+            <span className="crumb-path">{selected.file.path}</span>
+            <button
+              className="mini-btn"
+              onClick={() => {
+                const first = [...changeMarks(patch).keys()].sort((a, b) => a - b)[0];
+                onOpenFile(`${repoPath.replace(/[\/]+$/, "")}/${selected.file.path}`, first);
+              }}
+              title="Show the whole file in the Code view, at the first change"
+            >
+              Open in Code view
+            </button>
+          </div>
+        )}
         <DiffView
           patch={patch}
           emptyMessage={

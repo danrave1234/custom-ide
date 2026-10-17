@@ -26,14 +26,14 @@ export default function UpdateNotice({ updater, runningCount }: Props) {
       break;
     case "available":
       message =
-        `VibeDeck v${state.update.version} is available.` +
+        `Vide v${state.update.version} is available.` +
         (runningCount > 0 ? ` Updating restarts the app and stops ${runningCount} running process${runningCount === 1 ? "" : "es"}.` : "");
       break;
     case "downloading":
       message = `Downloading v${state.update.version}…${state.percent !== null ? ` ${state.percent}%` : ""}`;
       break;
     case "installing":
-      message = `Installing v${state.update.version}. VibeDeck will restart.`;
+      message = `Installing v${state.update.version}. Vide will restart.`;
       break;
     case "error":
       message = state.message;

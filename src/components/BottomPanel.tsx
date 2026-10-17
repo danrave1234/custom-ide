@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { RepoInfo, RunSession } from "../types";
+import type { AgentCli } from "../api";
 import TerminalPane from "./TerminalPane";
 import { useResizableY } from "../useResizable";
 import { ChevronDown, ChevronRight, Close } from "./Icons";
@@ -8,6 +9,15 @@ interface Term {
   id: string;
   title: string;
   cwd: string;
+  command?: string;
+}
+
+/** A request from App (agent API, command palette) to open a terminal. */
+export interface TerminalRequest {
+  nonce: number;
+  cwd: string;
+  title?: string;
+  command?: string;
 }
 
 interface Props {
@@ -25,25 +35,48 @@ interface Props {
   /** cwd for newly opened terminals */
   defaultCwd: string;
   defaultLabel: string;
+  /** coding-agent CLIs found on PATH, offered in the "+ Agent" menu */
+  agentClis: AgentCli[];
+  terminalRequest: TerminalRequest | null;
 }
 
 /**
  * Bottom panel: terminals only. Run output stays in the Favorites / Run / Sync
  * views; this panel just shows how many runs are going.
  */
-export default function BottomPanel({ sessions, open, onToggle, defaultCwd, defaultLabel }: Props) {
+export default function BottomPanel({
+  sessions,
+  open,
+  onToggle,
+  defaultCwd,
+  defaultLabel,
+  agentClis,
+  terminalRequest,
+}: Props) {
   const [height, onResize] = useResizableY("vd-bottom-h", 300, 140, 650);
   const [terms, setTerms] = useState<Term[]>([]);
   const [activeTermId, setActiveTermId] = useState<string | null>(null);
+  const [agentMenuOpen, setAgentMenuOpen] = useState(false);
   const counter = useRef(0);
 
-  const newTerm = () => {
+  const addTerm = (cwd: string, title?: string, command?: string) => {
     counter.current += 1;
     const id = `term-${Date.now()}-${counter.current}`;
-    const title = `${defaultLabel} ${counter.current}`;
-    setTerms((prev) => [...prev, { id, title, cwd: defaultCwd }]);
+    setTerms((prev) => [...prev, { id, title: title ?? `${defaultLabel} ${counter.current}`, cwd, command }]);
     setActiveTermId(id);
   };
+
+  const newTerm = () => addTerm(defaultCwd);
+
+  const launchAgent = (agent: AgentCli) => {
+    setAgentMenuOpen(false);
+    addTerm(defaultCwd, `${agent.name} · ${defaultLabel}`, agent.command);
+  };
+
+  useEffect(() => {
+    if (terminalRequest) addTerm(terminalRequest.cwd, terminalRequest.title, terminalRequest.command);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [terminalRequest?.nonce]);
 
   const closeTerm = (id: string) => {
     setTerms((prev) => {
@@ -55,7 +88,7 @@ export default function BottomPanel({ sessions, open, onToggle, defaultCwd, defa
 
   // Open the first terminal when the panel is shown
   useEffect(() => {
-    if (open && terms.length === 0) newTerm();
+    if (open && terms.length === 0 && !terminalRequest) newTerm();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
@@ -86,6 +119,33 @@ export default function BottomPanel({ sessions, open, onToggle, defaultCwd, defa
           </span>
         ))}
         <div className="bottom-strip-actions">
+          {open && agentClis.length > 0 && (
+            <div className="agent-launch">
+              <button
+                className="mini-btn"
+                onClick={() => setAgentMenuOpen((v) => !v)}
+                title={`Launch a coding agent in ${defaultLabel}`}
+                aria-haspopup="menu"
+                aria-expanded={agentMenuOpen}
+              >
+                + Agent <ChevronDown size={10} />
+              </button>
+              {agentMenuOpen && (
+                <>
+                  <div className="ws-backdrop" onClick={() => setAgentMenuOpen(false)} />
+                  <div className="agent-menu" role="menu">
+                    <div className="ws-section">Launch in {defaultLabel}</div>
+                    {agentClis.map((a) => (
+                      <button key={a.id} role="menuitem" className="agent-menu-item" onClick={() => launchAgent(a)} title={a.path}>
+                        <span>{a.name}</span>
+                        <code>{a.command}</code>
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
           {open && (
             <button className="mini-btn term-new" onClick={newTerm} title="New terminal">
               + New
@@ -98,9 +158,11 @@ export default function BottomPanel({ sessions, open, onToggle, defaultCwd, defa
           <div className="terminal-body">
             {terms.length === 0 ? (
               <div className="bottom-empty">
-                <div className="bottom-empty-icon">{"&gt;_"}</div>
+                <div className="bottom-empty-icon">{">_"}</div>
                 <div className="bottom-empty-text">No terminals</div>
-                <div className="bottom-empty-hint">Click "+ New" to open a terminal</div>
+                <div className="bottom-empty-hint">
+                  Click "+ New" to open a terminal{agentClis.length > 0 ? ', or "+ Agent" to launch a coding agent' : ""}
+                </div>
               </div>
             ) : (
               <>
@@ -126,7 +188,7 @@ export default function BottomPanel({ sessions, open, onToggle, defaultCwd, defa
                   ))}
                 </div>
                 {terms.map((t) => (
-                  <TerminalPane key={t.id} id={t.id} cwd={t.cwd} visible={t.id === activeTermId} />
+                  <TerminalPane key={t.id} id={t.id} cwd={t.cwd} command={t.command} visible={t.id === activeTermId} />
                 ))}
               </>
             )}

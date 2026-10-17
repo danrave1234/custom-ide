@@ -58,6 +58,7 @@ pub fn pty_open(
     cwd: String,
     rows: u16,
     cols: u16,
+    command: Option<String>,
 ) -> Result<(), String> {
     {
         let map = state.terminals.lock().unwrap();
@@ -83,7 +84,14 @@ pub fn pty_open(
     let mut child = pair.slave.spawn_command(cmd).map_err(|e| e.to_string())?;
     let killer = child.clone_killer();
     let mut reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
-    let writer = pair.master.take_writer().map_err(|e| e.to_string())?;
+    let mut writer = pair.master.take_writer().map_err(|e| e.to_string())?;
+
+    // launch commands (e.g. a coding-agent CLI) are typed into the shell rather
+    // than spawned directly, so the shell survives the agent exiting
+    if let Some(command) = command.as_deref().map(str::trim).filter(|c| !c.is_empty()) {
+        let _ = writer.write_all(format!("{command}\r").as_bytes());
+        let _ = writer.flush();
+    }
 
     state.terminals.lock().unwrap().insert(
         id.clone(),

@@ -1,50 +1,41 @@
 #!/usr/bin/env node
 /**
- * VibeDeck Agent CLI
+ * Vide CLI
  *
- * Control a running VibeDeck instance from the terminal.
- * Requires VibeDeck to be running with the agent API enabled (default).
+ * Control a running Vide instance from a terminal, a script, or a coding
+ * agent (Claude Code, Codex, Gemini CLI, ...). Every command prints JSON.
  *
- * Usage:
- *   node scripts/agent.mjs health
- *   node scripts/agent.mjs status
- *   node scripts/agent.mjs open "C:\projects\my-app"
- *   node scripts/agent.mjs select "my-repo"
- *   node scripts/agent.mjs select --path "C:\projects\my-repo"
- *   node scripts/agent.mjs configs "C:\projects\my-repo"
- *   node scripts/agent.mjs run --name "dev" --command "npm run dev" --cwd "C:\projects\my-app"
- *   node scripts/agent.mjs stop "<session-id>"
- *   node scripts/agent.mjs runs
- *   node scripts/agent.mjs output "<session-id>" [--tail 50]
- *   node scripts/agent.mjs view favorites
- *   node scripts/agent.mjs view repo --tab run
- *   node scripts/agent.mjs group-run "Backend"
+ * Usage: vide <command> [args]   (or: npm run agent -- <command> [args])
+ * Run `vide help` for the command list.
  */
 
-import { readFileSync, existsSync } from "fs";
-import { join, dirname } from "path";
+import { readFileSync, existsSync, realpathSync } from "fs";
+import { join, dirname, resolve } from "path";
 import { fileURLToPath } from "url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
+// Tauri's app_config_dir is <platform config dir>/<bundle identifier>.
+// The identifier stays com.danrave.vibedeck so existing installs keep their data.
+const APP_IDENTIFIER = "com.danrave.vibedeck";
+
+export function configPaths(env = process.env, platform = process.platform) {
+  const { HOME, APPDATA, XDG_CONFIG_HOME } = env;
+  if (platform === "win32") return [join(APPDATA || "", APP_IDENTIFIER, "agent.json")];
+  if (platform === "darwin") {
+    return [join(HOME || "", "Library", "Application Support", APP_IDENTIFIER, "agent.json")];
+  }
+  return [join(XDG_CONFIG_HOME || join(HOME || "", ".config"), APP_IDENTIFIER, "agent.json")];
+}
+
 // Find agent config
 function findConfig() {
   // Check environment variables first
-  const port = process.env.VIBEDECK_AGENT_PORT || "17321";
-  const token = process.env.VIBEDECK_AGENT_TOKEN;
+  const port = process.env.VIDE_AGENT_PORT || process.env.VIBEDECK_AGENT_PORT || "17321";
+  const token = process.env.VIDE_AGENT_TOKEN || process.env.VIBEDECK_AGENT_TOKEN;
   if (token) return { port: Number(port), token };
 
-  // Try app config directory (platform-specific)
-  const possiblePaths = [];
-  const { HOME, APPDATA, LOCALAPPDATA } = process.env;
-
-  if (process.platform === "win32") {
-    possiblePaths.push(join(LOCALAPPDATA || "", "vibedeck", "agent.json"));
-  } else if (process.platform === "darwin") {
-    possiblePaths.push(join(HOME || "", "Library", "Application Support", "vibedeck", "agent.json"));
-  } else {
-    possiblePaths.push(join(HOME || "", ".config", "vibedeck", "agent.json"));
-  }
+  const possiblePaths = configPaths();
 
   for (const path of possiblePaths) {
     if (existsSync(path)) {
@@ -73,14 +64,18 @@ async function request(config, method, path, body) {
     init.body = JSON.stringify(body);
   }
 
-  const res = await fetch(url, init);
-  const data = await res.json();
+  let res;
+  try {
+    res = await fetch(url, init);
+  } catch {
+    console.error(`Error: cannot connect to Vide on port ${config.port}. Is the app running?`);
+    process.exit(2);
+  }
+  const data = await res.json().catch(() => ({}));
 
   if (!res.ok) {
     if (res.status === 401) {
-      console.error("Error: unauthorized. Set VIBEDECK_AGENT_TOKEN or check agent.json.");
-    } else if (res.status === 503 || res.status === 0) {
-      console.error("Error: cannot connect to VibeDeck. Is it running?");
+      console.error(`Error: unauthorized. Set VIDE_AGENT_TOKEN or check ${configPaths()[0]}.`);
     } else {
       console.error(`Error: ${data.error || res.statusText}`);
     }
@@ -124,6 +119,15 @@ function parseArgs(args) {
   return result;
 }
 
+function print(data) {
+  console.log(JSON.stringify(data, null, 2));
+}
+
+function fail(message) {
+  console.error(`Error: ${message}`);
+  process.exit(1);
+}
+
 async function main() {
   const raw = process.argv.slice(2);
 
@@ -132,25 +136,40 @@ async function main() {
   const parsed = parseArgs(args);
 
   if (!parsed.cmd || parsed.cmd === "help" || parsed.cmd === "-h" || parsed.cmd === "--help") {
-    console.log(`VibeDeck Agent CLI
+    console.log(`Vide CLI — drive the Vide desktop app from a terminal or coding agent.
+All commands print JSON. Exit codes: 0 ok, 1 request error, 2 app not running.
 
-Usage:
-  agent health                    Check if VibeDeck agent is running
-  agent status                    Get current workspace status
-  agent open "<path>"             Open a workspace folder
-  agent select "<name>"           Select a repo by name
-  agent select --path "<path>"    Select a repo by path
-  agent configs "<repo-path>"     List run configs for a repo
-  agent run --name <n> --cmd <c> --cwd <d>  Start a run
-  agent stop "<session-id>"       Stop a running session
-  agent runs                      List running sessions
-  agent output "<id>" [--tail N]  Get session output
-  agent view <view> [--tab <t>]   Switch view (repo/favorites/sync)
-  agent group-run "<name>"        Run a favorites group
+Workspace
+  health                          Check that Vide is running (no token needed)
+  describe                        Machine-readable list of API routes
+  status                          Current workspace root and persisted state
+  open "<path>"                   Open a workspace folder
+  repos                           List repos in the open workspace
+  select "<name>" | --path <p>    Select a repo in the sidebar
+  view <repo|favorites|sync|code> [--tab changes|branches|history|run|env]
+  show "<file>[:line]"            Open a file in the Code view, scrolled to the line
 
-Environment:
-  VIBEDECK_AGENT_PORT    Override default port (17321)
-  VIBEDECK_AGENT_TOKEN   Override auth token
+Git (read-only)
+  git-status "<repo>"             Branch, ahead/behind, changed files
+  diff "<repo>" [--file f] [--staged]   Unified diff of working changes
+
+Runs
+  configs "<repo>"                Detected run configs (npm scripts, cargo, ...)
+  run --name <n> --command <c> --cwd <d> [--repo <r>]
+  stop "<session-id>"             Stop a run (id is "<repo>::<name>")
+  runs                            Running session ids
+  output "<id>" [--tail N]        Last N lines of a run's output
+  group-run "<name>"              Run a favorites group
+
+Agents
+  agents                          Coding-agent CLIs found on PATH
+  launch <agent> [--cwd <dir>]    Open a terminal tab running claude/codex/gemini/...
+  terminal [--cwd <dir>] [--command <c>] [--title <t>]
+  notify "<message>" [--title t] [--level info|success|warning|error] [--repo <path>]
+
+Environment
+  VIDE_AGENT_PORT    Override default port (17321)
+  VIDE_AGENT_TOKEN   Override auth token (VIBEDECK_* names still work)
 `);
     return;
   }
@@ -161,6 +180,76 @@ Environment:
     case "health": {
       const data = await request(config, "GET", "/health");
       console.log(JSON.stringify(data, null, 2));
+      break;
+    }
+
+    case "describe": {
+      print(await request(config, "GET", "/v1"));
+      break;
+    }
+
+    case "repos": {
+      print(await request(config, "GET", "/v1/repos"));
+      break;
+    }
+
+    case "git-status":
+    case "diff": {
+      const repo = parsed.args[0] || parsed.opts.repo || process.cwd();
+      const q = new URLSearchParams({ repo });
+      if (parsed.cmd === "diff") {
+        if (parsed.opts.file) q.set("file", parsed.opts.file);
+        if (parsed.opts.staged) q.set("staged", "1");
+      }
+      const route = parsed.cmd === "diff" ? "/v1/git/diff" : "/v1/git/status";
+      print(await request(config, "GET", `${route}?${q}`));
+      break;
+    }
+
+    case "show": {
+      const spec = parsed.args[0] || parsed.opts.file;
+      if (!spec) fail('file is required. Usage: vide show "src/App.tsx:42"');
+      // accept path:line, but leave Windows drive letters ("C:\x") alone
+      const m = spec.match(/^(.*?):(\d+)$/);
+      const file = resolve(m ? m[1] : spec);
+      const line = m ? Number(m[2]) : parsed.opts.line ? Number(parsed.opts.line) : undefined;
+      print(await request(config, "POST", "/v1/file/open", { path: file, line }));
+      break;
+    }
+
+    case "agents": {
+      print(await request(config, "GET", "/v1/agents"));
+      break;
+    }
+
+    case "launch": {
+      const agent = parsed.args[0] || parsed.opts.agent;
+      if (!agent) fail('agent is required. Usage: vide launch <claude|codex|gemini|...> [--cwd <dir>]');
+      const cwd = parsed.opts.cwd || process.cwd();
+      print(await request(config, "POST", "/v1/terminal/open", { cwd, agent, title: parsed.opts.title }));
+      break;
+    }
+
+    case "terminal": {
+      const body = {
+        cwd: parsed.opts.cwd || process.cwd(),
+        command: parsed.opts.command || parsed.opts.cmd,
+        title: parsed.opts.title,
+      };
+      print(await request(config, "POST", "/v1/terminal/open", body));
+      break;
+    }
+
+    case "notify": {
+      const message = parsed.args.join(" ") || parsed.opts.message;
+      if (!message) fail('message is required. Usage: vide notify "<message>"');
+      const body = {
+        message,
+        title: parsed.opts.title,
+        level: parsed.opts.level,
+        repo: parsed.opts.repo === true ? process.cwd() : parsed.opts.repo && resolve(parsed.opts.repo),
+      };
+      print(await request(config, "POST", "/v1/notify", body));
       break;
     }
 
@@ -274,12 +363,16 @@ Environment:
 
     default:
       console.error(`Unknown command: ${parsed.cmd}`);
-      console.error("Run 'agent help' for usage.");
+      console.error("Run 'vide help' for usage.");
       process.exit(1);
   }
 }
 
-main().catch((e) => {
-  console.error("Fatal:", e.message);
-  process.exit(1);
-});
+// only run when executed directly, so tests can import configPaths()
+const invokedPath = process.argv[1] ? realpathSync(process.argv[1]) : "";
+if (invokedPath === realpathSync(fileURLToPath(import.meta.url))) {
+  main().catch((e) => {
+    console.error("Fatal:", e.message);
+    process.exit(1);
+  });
+}

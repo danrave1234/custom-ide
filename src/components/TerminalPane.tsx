@@ -8,6 +8,8 @@ import "@xterm/xterm/css/xterm.css";
 interface Props {
   id: string;
   cwd: string;
+  /** typed into the shell once it opens (agent CLI launches) */
+  command?: string;
   visible: boolean;
 }
 
@@ -20,7 +22,7 @@ const THEME = {
   brightBlack: "#8a94a6",
 };
 
-export default function TerminalPane({ id, cwd, visible }: Props) {
+export default function TerminalPane({ id, cwd, command, visible }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
@@ -49,7 +51,7 @@ export default function TerminalPane({ id, cwd, visible }: Props) {
       /* host not laid out yet */
     }
 
-    api.ptyOpen(id, cwd, term.rows, term.cols).catch(() => {});
+    api.ptyOpen(id, cwd, term.rows, term.cols, command).catch(() => {});
 
     const inputSub = term.onData((data) => api.ptyInput(id, data).catch(() => {}));
 
