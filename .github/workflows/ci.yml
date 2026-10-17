@@ -48,7 +48,7 @@ jobs:
       - name: Test agent CLI
         run: npm run test:cli
 
-      - name: Test code view helpers
+      - name: Test UI helpers
         run: npm run test:ui
 
       - name: Build frontend

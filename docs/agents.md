@@ -8,6 +8,14 @@ There are three ways agents and Vide work together:
 2. **Let agents drive Vide.** A localhost-only HTTP API (and the `vide` CLI wrapping it) lets an agent open workspaces, start/stop dev servers, read their output, check git status and diffs, and open terminals.
 3. **Let agents tap you on the shoulder.** `vide notify` shows a notification in the app, with a **Review changes** button that jumps to the repo's diff. Wire it into your agent's hooks so you know the moment a run finishes or the agent is waiting on you.
 
+## Contents
+
+- [Setup](#setup)
+- [CLI](#cli)
+- [Hook recipes](#hook-recipes)
+- [HTTP API](#http-api)
+- [Limits](#limits)
+
 ## Setup
 
 - Vide must be **running**; the API is embedded in the desktop app.
@@ -29,7 +37,7 @@ That puts `vide` on your `PATH`. Without linking, use `npm run agent -- <command
 The CLI finds the token automatically. It lives in the app config directory:
 
 | Platform | Path |
-|----------|------|
+| --- | --- |
 | Windows | `%APPDATA%\com.danrave.vibedeck\agent.json` |
 | macOS | `~/Library/Application Support/com.danrave.vibedeck/agent.json` |
 | Linux | `$XDG_CONFIG_HOME/com.danrave.vibedeck/agent.json` (default `~/.config/...`) |
@@ -40,7 +48,9 @@ The folder keeps its original `vibedeck` identifier so existing installs keep th
 { "port": 17321, "token": "aBcDeFgHiJkLmNoPqRsTuVwX" }
 ```
 
-Environment variables `VIDE_AGENT_PORT` and `VIDE_AGENT_TOKEN` (the older `VIBEDECK_*` names still work):
+### Environment variables
+
+`VIDE_AGENT_PORT` and `VIDE_AGENT_TOKEN` override the port and token. The older `VIBEDECK_*` names still work.
 
 - **CLI side:** they replace what the CLI reads from `agent.json`.
 - **App side:** they are only used when the app *creates* `agent.json` on first launch. Once the file exists it wins, so to change the port or token later, edit `agent.json` and restart Vide. Setting `VIDE_AGENT_TOKEN` only for the CLI, with a different token in `agent.json`, gives `401 unauthorized`.
@@ -121,12 +131,16 @@ To check a dev server, use `vide runs` and `vide output "<id>" --tail 80` instea
 
 ## HTTP API
 
-JSON in, JSON out. Header: `Authorization: Bearer <token>`. `GET /v1` returns this list in machine-readable form.
+JSON in, JSON out, with the header `Authorization: Bearer <token>`. `GET /v1` returns the route list below in machine-readable form.
 
-Routes that act on the UI (open, select, view, run, stop, group run, terminal, notify, file open) answer `{"ok": true, "queued": false}` once the action has been handed to a window. If no window is listening yet (Vide is still starting, or the page is reloading) the action is held and replayed as soon as a window is ready, and the response says `"queued": true`. With several windows open, the action goes to the focused one.
+Routes that act on the UI (open, select, view, run, stop, group run, terminal, notify and file open) behave like this:
+
+- They answer `{"ok": true, "queued": false}` once the action has been handed to a window.
+- If no window is listening yet, because Vide is still starting or the page is reloading, the action is held and replayed when a window is ready. The response then says `"queued": true`.
+- With several windows open, the action goes to the focused one.
 
 | Method | Path | Input | Does |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | GET | `/health` | | `{"status":"ok","app":"vide"}`, no auth |
 | GET | `/v1` | | Route list |
 | GET | `/v1/status` | | Workspace root and persisted state |
@@ -146,6 +160,8 @@ Routes that act on the UI (open, select, view, run, stop, group run, terminal, n
 | GET | `/v1/agents` | | Agent CLIs found on `PATH` |
 | POST | `/v1/terminal/open` | `{ cwd, agent?, command?, title? }` | Open a terminal tab, optionally launching an agent or command |
 | POST | `/v1/notify` | `{ message, title?, level?, repo? }` | Show a notification (`info`/`success`/`warning`/`error`) |
+
+Example:
 
 ```bash
 curl -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \

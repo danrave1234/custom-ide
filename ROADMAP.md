@@ -1,44 +1,43 @@
 # Vide roadmap
 
-This is a prioritized set of improvements rather than a promise of dates. Reliability and safe distribution should come before adding more surface area.
+A prioritized list of improvements, not a promise of dates. Vide should stay lightweight and focused on running and reviewing work done by coding agents, so reliability and safe distribution come before new surface area.
 
-## P0 — distribution and safety
+## Done
 
-- **Sign release packages.** Add Windows code signing and Apple Developer ID signing/notarization so installers do not trigger avoidable trust warnings.
-- **Add secure automatic updates.** Configure Tauri's signed updater only after the signing key has a documented backup and rotation process.
-- **Replace the disabled CSP.** Define the narrowest Content Security Policy that supports the local Tauri UI and terminal functionality.
-- **Harden filesystem boundaries.** Canonicalize and verify every repository and `.env` path accepted by backend commands; add traversal and symlink tests.
-- **Expand destructive-action protection.** Clearly preview discard, force-delete, rebase, force-push, and process-kill operations, with actionable recovery guidance.
-- **Add release smoke tests.** Install and launch each generated package in CI or a post-build test environment before publishing it.
+These items from earlier versions of this roadmap are finished ("next release" means merged to `main` but not yet released):
 
-## P1 — reliability and test coverage
+- **Signed in-app updates** (0.5.0): one check per launch, verified with the updater key.
+- **Command palette** (0.2.0): repos, views and actions; agent launch in 1.0.0; run, stop and restart in the next release.
+- **Smaller startup bundle** (1.0.0): the Code view and its syntax highlighter load only when first opened.
+- **Sandboxed file reads** (1.0.0): the Code view rejects paths outside the browsed folder, with traversal tests.
+- **Crash notifications** (next release): a run that dies on its own shows the error with a Restart action.
 
-- **Make auto-restart configurable per run.** Add an on/off toggle, include/exclude globs, debounce settings, and an indicator showing what directory is watched.
-- **Use native filesystem notifications.** Replace repeated full-tree scans with an event-driven watcher and retain a polling fallback for network filesystems.
-- **Test full workflows.** Add frontend component tests and Tauri integration tests for Git status, process lifecycle, persistence migration, sync conflict handling, and terminal cleanup.
-- **Recover interrupted state.** Detect processes or rebases left by crashes, explain what can be recovered, and never imply a process is running when it is not.
-- **Add structured diagnostics.** Write bounded, redacted logs and expose an “Export diagnostics” action that never includes environment values or credentials.
+## P0: distribution and safety
 
-## P2 — daily workflow improvements
+- **Sign the Windows installer.** Apply to [SignPath Foundation](https://signpath.org/) (free for open-source projects) and sign `Vide_<version>_x64-setup.exe` in the release workflow so SmartScreen stops warning.
+- **Replace the disabled CSP.** Define the narrowest Content Security Policy that still supports the UI, terminals and the Code view.
+- **Harden the remaining file paths.** Apply the Code view's canonical-path checks to repository and `.env` paths accepted by other backend commands.
+- **Preview destructive actions.** Show what discard, force-delete, rebase, force-push and process-kill will do, with recovery guidance.
+- **Release smoke test.** Install and launch the built installer in CI before the release is published.
 
-- **Notifications and problem matching.** Notify when background runs finish and make compiler/test errors clickable when a file and line can be parsed.
-- **Run dependencies and health checks.** Let groups wait for ports, URLs, or successful commands instead of relying only on fixed delays.
-- **Richer Git conflict handling.** Add stash management, conflict lists, continue/skip/abort controls, tags, and safer detached-HEAD handling.
-- **Workspace search and command launcher.** Provide keyboard-first navigation across repositories, branches, commands, and recent actions.
-- **Import/export settings.** Support a human-readable workspace configuration that teams can review and share without secrets.
-- **Accessibility pass.** Complete keyboard navigation, visible focus states, semantic labels, screen-reader announcements, and contrast checks.
+## P1: reliability and tests
 
-## P3 — scale and maintainability
+- **Configurable auto-restart.** Per-run on/off toggle, include and exclude globs, debounce, and a visible watched-folder indicator.
+- **Native file watching.** Replace repeated folder scans with OS file events, keeping polling as a fallback for network drives.
+- **Workflow tests.** Frontend component tests and Tauri integration tests for git status, process lifecycle, state migration, sync conflicts and terminal cleanup.
+- **Recover interrupted state.** Detect rebases left by a crash and never show a run as active when its process is gone.
+- **Diagnostics export.** Bounded, redacted logs and an "Export diagnostics" action that never includes environment values or credentials.
 
-- **Reduce the frontend bundle.** Split large views and terminal code so startup does not load features that are not yet visible.
-- **Handle very large workspaces.** Make repository scanning incremental, cancel stale scans, virtualize long lists, and publish measured performance targets.
-- **Formalize state migrations.** Version persisted data and test forward migration, malformed data recovery, and rollback behavior.
-- **Add opt-in update/error metrics.** If telemetry is introduced, keep it disabled by default, disclose every collected field, and avoid source paths and command output.
-- **Publish contribution and security policies.** Add contribution setup, architecture notes, support expectations, and a private vulnerability-reporting path.
+## P2: daily workflow
 
-## Suggested release sequence
+- **Clickable errors.** Turn `file:line` in compiler and test output into links that open the Code view at that line.
+- **Ready checks for groups.** Let a favorites group wait for a port, URL or successful command instead of a fixed delay.
+- **Richer git conflict handling.** Stash management, conflict lists, continue, skip and abort controls, tags, and safer detached-HEAD handling.
+- **Shareable workspace config.** A readable file teams can commit, without secrets.
+- **Accessibility pass.** Screen-reader labels and announcements, and a contrast check across the UI.
 
-1. Ship `0.2.0` with CI, synchronized versioning, draft multi-platform packages, and the current auto-restart feature.
-2. Ship `0.3.0` with signed packages, updater infrastructure, CSP hardening, and release smoke tests.
-3. Ship `0.4.0` with configurable native file watching, diagnostics, and broader integration coverage.
-4. Consider `1.0.0` only after persistence migrations, destructive-operation recovery, signed updates, and supported-platform smoke tests are routine.
+## P3: scale and maintainability
+
+- **Very large workspaces.** Incremental, cancellable repository scans, virtualized long lists, and measured performance targets.
+- **Versioned state.** Version persisted data and test forward migration and recovery from malformed files.
+- **Contribution and security policies.** Setup notes, architecture overview, support expectations, and a private way to report vulnerabilities.

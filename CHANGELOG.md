@@ -1,6 +1,8 @@
 # Changelog
 
-All notable changes to Vide (formerly VibeDeck) will be documented in this file. The project follows [Semantic Versioning](https://semver.org/) and the format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+All notable changes to Vide (formerly VibeDeck) are documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
@@ -15,8 +17,11 @@ All notable changes to Vide (formerly VibeDeck) will be documented in this file.
 ### Changed
 
 - The Windows app is now fully named Vide: installer, Start menu and desktop shortcuts, Apps list entry and `Vide.exe`. Installing or updating replaces an existing VibeDeck install (no second copy) and keeps all settings. A taskbar pin to the old VibeDeck needs to be pinned again.
+- Releases ship only the Windows installer, `Vide_<version>_x64-setup.exe`, plus the `latest.json` used for in-app updates.
 
-- Releases ship only the Windows installer, named `Vide_<version>_x64-setup.exe`, plus the `latest.json` used for in-app updates. MSI, macOS, Linux and separate `.sig` files are no longer published (update signatures live in `latest.json`).
+### Removed
+
+- MSI, macOS and Linux release packages, and the separate `.sig` files (update signatures live in `latest.json`). macOS and Linux can still be built from source.
 
 ## [1.0.0] - 2026-10-17
 
@@ -97,7 +102,7 @@ Version bump only. The features originally listed for this release were not incl
 - The top bar is simplified: version, build time, Kill port, Open folder, and New window moved into an overflow menu.
 - The selected repository shows an accent bar in addition to its background color.
 
-## [0.1.0]
+## [0.1.0] - 2026-09-07
 
 ### Added
 
@@ -111,3 +116,11 @@ Version bump only. The features originally listed for this release were not incl
 ### Changed
 
 - Production package metadata now uses the VibeDeck product name and description.
+
+[Unreleased]: https://github.com/danrave1234/custom-ide/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/danrave1234/custom-ide/compare/v0.5.0...v1.0.0
+[0.5.0]: https://github.com/danrave1234/custom-ide/compare/v0.4.0...v0.5.0
+[0.4.0]: https://github.com/danrave1234/custom-ide/compare/v0.3.0...v0.4.0
+[0.3.0]: https://github.com/danrave1234/custom-ide/compare/v0.2.0...v0.3.0
+[0.2.0]: https://github.com/danrave1234/custom-ide/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/danrave1234/custom-ide/tree/v0.1.0
