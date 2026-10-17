@@ -80,3 +80,7 @@ See [`ROADMAP.md`](ROADMAP.md) for the prioritized product and engineering impro
 - `src/components/CodeView.tsx` — explorer + code viewer; `src-tauri/src/files.rs` — sandboxed directory listing and file reads
 - `scripts/agent.mjs` — the `vide` CLI (`npm link` to install it)
 - `assets/brand/` — logo source (`npx tauri icon assets/brand/vide-icon.svg` regenerates the app icons)
+
+## License
+
+[MIT](LICENSE) © 2026 Danrave

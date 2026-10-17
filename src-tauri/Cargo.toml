@@ -3,6 +3,7 @@ name = "vibedeck"
 version = "1.0.0"
 description = "A lightweight desktop dashboard for AI-assisted coding workflows"
 authors = ["Danrave"]
+license = "MIT"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
