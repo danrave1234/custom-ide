@@ -4,6 +4,10 @@ All notable changes to Vide (formerly VibeDeck) will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- Releases ship only the Windows installer, named `Vide_<version>_x64-setup.exe`, plus the `latest.json` used for in-app updates. MSI, macOS, Linux and separate `.sig` files are no longer published (update signatures live in `latest.json`).
+
 ## [1.0.0] - 2026-10-17
 
 ### Added

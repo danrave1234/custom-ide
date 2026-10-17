@@ -57,14 +57,14 @@ To publish a release:
 1. Run `npm run version:set -- <version>` and update `CHANGELOG.md`.
 2. Commit the version and changelog changes.
 3. Create a matching tag, such as `git tag v0.2.0`, and push the commit and tag.
-4. The `Release` GitHub Actions workflow validates the tag and builds Windows, Linux, Intel macOS, and Apple Silicon macOS installers.
+4. The `Release` GitHub Actions workflow validates the tag and builds the Windows installer, `Vide_<version>_x64-setup.exe`.
 5. Review the generated draft GitHub Release and publish it when the assets are ready.
 
-The workflow deliberately rejects a tag whose version does not match the manifests. Current community packages are unsigned, so Windows and macOS may display trust warnings until code-signing certificates are configured.
+The workflow deliberately rejects a tag whose version does not match the manifests. The installer is not code-signed yet, so Windows SmartScreen may warn ("More info → Run anyway") until signing is set up.
 
 ### In-app updates
 
-Installed copies check for a newer release once, a few seconds after launch (and on demand from **Check for updates** in the command palette or the `•••` menu). There is no background polling. The check downloads `latest.json` from the latest *published* GitHub Release, so drafts and pre-releases are never offered. Clicking **Update and restart** downloads the signed bundle, stops running dev servers and terminals, installs, and relaunches. Windows (NSIS and MSI), macOS, and Linux (AppImage, `.deb`, `.rpm`) are supported; `.deb`/`.rpm` installs ask for an administrator password.
+Installed copies check for a newer release once, a few seconds after launch (and on demand from **Check for updates** in the command palette or the `•••` menu). There is no background polling. The check downloads `latest.json` from the latest *published* GitHub Release, so drafts and pre-releases are never offered. Clicking **Update and restart** downloads the signed bundle, stops running dev servers and terminals, installs, and relaunches. Releases ship a single Windows installer (`Vide_<version>_x64-setup.exe`), which updates in place. macOS and Linux are not packaged; build them yourself with `npm run tauri build -- --bundles dmg` or `--bundles appimage`.
 
 Updates are signed with a separate updater key (not an OS code-signing certificate). The public key lives in `src-tauri/tauri.conf.json`; the private key must be stored as the `TAURI_SIGNING_PRIVATE_KEY` repository secret (plus `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` if it has a password). Keep a backup of the private key: if it is lost, existing installs can no longer verify updates and users must reinstall manually. To build signed installers locally, set `TAURI_SIGNING_PRIVATE_KEY` in your shell before `npm run tauri build`.
 

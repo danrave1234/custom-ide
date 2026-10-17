@@ -33,24 +33,9 @@ jobs:
         run: npm run test:version
 
   package:
+    # Releases ship one Windows installer (plus latest.json for in-app updates).
     needs: validate
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: ubuntu-22.04
-            target: ""
-            args: ""
-          - platform: windows-latest
-            target: ""
-            args: ""
-          - platform: macos-latest
-            target: aarch64-apple-darwin
-            args: --target aarch64-apple-darwin
-          - platform: macos-latest
-            target: x86_64-apple-darwin
-            args: --target x86_64-apple-darwin
-    runs-on: ${{ matrix.platform }}
+    runs-on: windows-latest
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -63,36 +48,34 @@ jobs:
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
 
       - name: Cache Rust build
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
-          key: ${{ matrix.target }}
-
-      - name: Install Linux build dependencies
-        if: matrix.platform == 'ubuntu-22.04'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf xdg-utils
 
       - name: Install frontend dependencies
         run: npm ci
 
-      - name: Build installers and attach them to a draft release
+      - name: Build the installer and attach it to a draft release
         uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Signs the in-app update bundles; latest.json is uploaded alongside them.
+          # Signs the in-app update bundle; latest.json is uploaded alongside it.
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: v__VERSION__
           releaseName: Vide v__VERSION__
-          releaseBody: Download the installer for your platform from the assets below. These community builds are currently unsigned, so the operating system may show a warning.
+          # e.g. Vide_1.0.1_x64-setup.exe (the installed app keeps its original internal name)
+          releaseAssetNamePattern: Vide_[version]_[arch][setup][ext]
+          releaseBody: |
+            Download **`Vide_…_x64-setup.exe`** below and run it. Installed copies update themselves.
+
+            The installer is not code-signed yet, so Windows SmartScreen may say "Windows protected your PC". Click **More info → Run anyway**.
           releaseDraft: true
           prerelease: ${{ contains(github.ref_name, '-') }}
           uploadUpdaterJson: true
-          args: ${{ matrix.args }}
+          updaterJsonPreferNsis: true
+          # signatures are embedded in latest.json; the separate .sig files are unused
+          uploadUpdaterSignatures: false
