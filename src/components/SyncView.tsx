@@ -92,7 +92,7 @@ export default function SyncView({
     }
     if (prefs.push) {
       if (isProtected(repo.branch)) {
-        steps.push(`echo [vibedeck] push skipped: "${repo.branch}" is a protected branch`);
+        steps.push(`echo [vide] push skipped: "${repo.branch}" is a protected branch`);
       } else {
         steps.push("git push --force-with-lease");
       }

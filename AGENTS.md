@@ -22,6 +22,7 @@ Vide (formerly VibeDeck) is a Tauri 2 desktop app: a React + TypeScript frontend
 ## Rules
 
 - Git operations shell out to the real `git` CLI; don't add a git library.
-- The bundle identifier `com.danrave.vibedeck` and the `vibedeck-state.json` file name are kept on purpose so existing installs keep their data and updates. Don't rename them.
+- The bundle identifier `com.danrave.vibedeck`, the Rust crate name `vibedeck` and the `vibedeck-state.json` file name are kept on purpose so existing installs keep their data and updates. Don't rename them.
+- `src-tauri/windows/installer-hooks.nsh` migrates installs from the old VibeDeck product name (removes it, keeps data, recreates shortcuts). Keep it while VibeDeck installs may still be updating; changing `productName` again needs the same treatment.
 - Versions are synced across `package.json`, `tauri.conf.json` and `Cargo.toml` with `npm run version:set -- <x.y.z>`; never edit one by hand.
 - Add user-facing changes to `CHANGELOG.md` under `[Unreleased]`.

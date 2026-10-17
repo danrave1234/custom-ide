@@ -67,7 +67,7 @@ jobs:
         with:
           tagName: v__VERSION__
           releaseName: Vide v__VERSION__
-          # e.g. Vide_1.0.1_x64-setup.exe (the installed app keeps its original internal name)
+          # e.g. Vide_1.0.1_x64-setup.exe
           releaseAssetNamePattern: Vide_[version]_[arch][setup][ext]
           releaseBody: |
             Download **`Vide_…_x64-setup.exe`** below and run it. Installed copies update themselves.

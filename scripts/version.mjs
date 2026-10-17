@@ -126,14 +126,14 @@ async function main() {
   const [command, expected] = process.argv.slice(2);
   if (command === "--check") {
     const version = await checkVersions(root, expected);
-    console.log(`VibeDeck version ${version} is synchronized.`);
+    console.log(`Vide version ${version} is synchronized.`);
     return;
   }
   if (!command || expected) {
     throw new Error("Usage: npm run version:set -- <version>\n       npm run version:check -- [expected-version]");
   }
   const version = await synchronizeVersions(root, command);
-  console.log(`Updated VibeDeck to ${version}.`);
+  console.log(`Updated Vide to ${version}.`);
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

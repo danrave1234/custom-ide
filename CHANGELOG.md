@@ -6,6 +6,8 @@ All notable changes to Vide (formerly VibeDeck) will be documented in this file.
 
 ### Changed
 
+- The Windows app is now fully named Vide: installer, Start menu and desktop shortcuts, Apps list entry and `Vide.exe`. Installing or updating replaces an existing VibeDeck install (no second copy) and keeps all settings. A taskbar pin to the old VibeDeck needs to be pinned again.
+
 - Releases ship only the Windows installer, named `Vide_<version>_x64-setup.exe`, plus the `latest.json` used for in-app updates. MSI, macOS, Linux and separate `.sig` files are no longer published (update signatures live in `latest.json`).
 
 ## [1.0.0] - 2026-10-17
