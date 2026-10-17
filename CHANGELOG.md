@@ -4,6 +4,8 @@ All notable changes to Vide (formerly VibeDeck) will be documented in this file.
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-10-17
+
 ### Added
 
 - New name and logo: VibeDeck is now **Vide** (Vibe + IDE). Settings, the agent token and the install identifier are unchanged.

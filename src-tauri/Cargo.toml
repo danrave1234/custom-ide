@@ -1,6 +1,6 @@
 [package]
 name = "vibedeck"
-version = "0.5.0"
+version = "1.0.0"
 description = "A lightweight desktop dashboard for AI-assisted coding workflows"
 authors = ["Danrave"]
 edition = "2021"
