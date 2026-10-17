@@ -15,7 +15,7 @@
     "agent": "node scripts/agent.mjs",
     "test:cli": "node --test scripts/agent.test.mjs",
     "vide": "node scripts/agent.mjs",
-    "test:ui": "node --experimental-strip-types --no-warnings --test scripts/codeLines.test.mjs"
+    "test:ui": "node --experimental-strip-types --no-warnings --test scripts/codeLines.test.mjs scripts/runSmarts.test.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",

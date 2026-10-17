@@ -33,6 +33,7 @@ fn new_window(app: tauri::AppHandle) -> Result<(), String> {
 /// Stop every dev server, file watcher and terminal Vide started.
 fn stop_child_processes(app: &tauri::AppHandle) {
     if let Some(pm) = app.try_state::<runs::ProcessManager>() {
+        pm.save_session(app);
         pm.kill_all();
     }
     if let Some(watchers) = app.try_state::<runs::WatchManager>() {
@@ -84,6 +85,8 @@ pub fn run() {
             git::git_pull,
             git::git_push,
             runs::detect_run_configs,
+            runs::missing_dependencies,
+            runs::take_last_session,
             runs::start_run,
             runs::stop_run,
             runs::list_running,

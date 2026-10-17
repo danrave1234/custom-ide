@@ -15,6 +15,7 @@ Built with **Tauri 2 + React + TypeScript** (uses the OS webview — no bundled 
 ## Features
 
 - **Code view.** Switch between **Dashboard** and **Code** in the top bar (`Ctrl+Shift+E`). Browse any repo in a file explorer with git status colors, open files in tabs with line numbers, syntax highlighting and green/red gutter marks for lines the agent changed. Files reload live as agents edit them. `Ctrl+P` opens a file by name, `Ctrl+F` finds in the file, `Ctrl+G` jumps to a line. The Changes tab has **Open in Code view** to jump from a diff to the full file. Read-only on purpose: agents write, you read.
+- **Smart runs.** One-click **Open** for the URL a dev server prints, a one-click install when dependencies are missing, crash alerts with the actual error and a Restart button, `Run`/`Stop`/`Restart` from `Ctrl+K`, and an offer to resume whatever was running when Vide last closed.
 - **Launch coding agents.** The **+ Agent** menu in the bottom panel lists every agent CLI on your `PATH` (Claude Code, Codex, Gemini, Cursor Agent, Copilot, Aider, opencode, Amp, Goose, Qwen Code) and opens it in a terminal tab in the selected repo. Also in the `Ctrl+K` palette.
 - **Agent control API and `vide` CLI.** Agents can open workspaces, start/stop and tail dev servers, read git status and diffs, open terminals, and post notifications back to you. Hook recipes for Claude Code and Codex are in [`docs/agents.md`](docs/agents.md).
 - **Agent notifications.** `vide notify "done" --repo` pops a notice in the app with a one-click **Review changes** jump to that repo's diff.

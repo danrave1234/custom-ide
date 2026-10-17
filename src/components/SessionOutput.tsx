@@ -2,6 +2,9 @@ import type { RepoInfo, RunSession } from "../types";
 import OutputPane from "./OutputPane";
 import CopyButton from "./CopyButton";
 import FreePortButton from "./FreePortButton";
+import { openUrl } from "@tauri-apps/plugin-opener";
+import { useMemo } from "react";
+import { detectAppUrls, urlLabel } from "../runSmarts";
 import { Refresh, Stop as StopIcon } from "./Icons";
 
 interface Props {
@@ -41,6 +44,11 @@ export default function SessionOutput({
   emptyHint,
 }: Props) {
   const active = sessions.find((s) => s.id === activeSessionId) ?? sessions[0] ?? null;
+  // where a running dev server says it is listening, so it can be opened in one click
+  const urls = useMemo(
+    () => (active?.status === "running" ? detectAppUrls(active.lines) : []),
+    [active?.status, active?.lines]
+  );
   const labelFn = repoLabel ?? ((path: string) => {
     const r = repos?.find((rp) => rp.path === path);
     return r?.name ?? defaultRepoLabel(path);
@@ -71,6 +79,16 @@ export default function SessionOutput({
           <div className="session-toolbar">
             <span className="session-command">{active.command}</span>
             <span className="session-actions">
+              {urls.map((url) => (
+                <button
+                  key={url}
+                  className="mini-btn open-url"
+                  title={`Open ${url} in your browser`}
+                  onClick={() => openUrl(url).catch((e) => onError(String(e)))}
+                >
+                  Open {urlLabel(url)} ↗
+                </button>
+              ))}
               {showFreePort && onRestart && (
                 <FreePortButton session={active} onRestart={onRestart} onError={onError} />
               )}

@@ -46,6 +46,16 @@ export default function RunView({
   const [query, setQuery] = useState("");
   const [sourceFilter, setSourceFilter] = useState<string | null>(null);
   const [panelWidth, onPanelResize] = useResizable("vd-run-w", 340, 240, 700);
+  const [missingDeps, setMissingDeps] = useState<api.MissingDeps[]>([]);
+
+  // re-check after any run in this repo stops (e.g. the install we offered finished)
+  const finishedKey = sessions
+    .filter((s) => s.status !== "running")
+    .map((s) => `${s.id}:${s.status}`)
+    .join("|");
+  useEffect(() => {
+    api.missingDependencies(repoPath).then(setMissingDeps).catch(() => setMissingDeps([]));
+  }, [repoPath, finishedKey]);
 
   useEffect(() => {
     setLoading(true);
@@ -126,6 +136,26 @@ export default function RunView({
   return (
     <div className="run-view">
       <div className="run-configs" style={{ width: panelWidth, minWidth: panelWidth }}>
+        {missingDeps.map((d) => {
+          const rel = d.cwd.slice(repoPath.length).replace(/^[\\/]+/, "");
+          const name = rel ? `install deps (${rel})` : "install deps";
+          const installing = runningIds.has(sessionIdFor(name));
+          return (
+            <div className="deps-banner" key={d.cwd}>
+              <span>
+                Dependencies not installed{rel ? <> in <code>{rel}</code></> : ""}
+              </span>
+              <button
+                className="mini-btn run"
+                disabled={installing}
+                title={`Run ${d.command} in ${d.cwd}`}
+                onClick={() => onStart(name, d.command, d.cwd)}
+              >
+                {installing ? "Installing…" : <><Play size={10} /> {d.command}</>}
+              </button>
+            </div>
+          );
+        })}
         <div className="run-search">
           <input
             placeholder="Search configs…"

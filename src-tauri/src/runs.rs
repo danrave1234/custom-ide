@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{BufRead, BufReader, Read};
@@ -40,7 +40,19 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 #[derive(Default)]
 pub struct ProcessManager {
     pub running: Mutex<HashMap<String, u32>>,
+    /// command and folder of each running process, so the next launch can
+    /// offer to start them again
+    specs: Mutex<HashMap<String, RunSpec>>,
 }
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct RunSpec {
+    pub id: String,
+    pub command: String,
+    pub cwd: String,
+}
+
+const LAST_SESSION_FILE: &str = "last-session.json";
 
 impl ProcessManager {
     /// Kill every tracked process tree — called when the app exits so dev
@@ -51,6 +63,40 @@ impl ProcessManager {
             let _ = kill_tree(pid);
         }
     }
+
+    /// Remember what is running (call before `kill_all`) so the next launch
+    /// can offer to resume it. Skipped when nothing runs, so a second call
+    /// after the processes are gone cannot erase the saved list.
+    pub fn save_session(&self, app: &AppHandle) {
+        let mut specs: Vec<RunSpec> = self.specs.lock().unwrap().values().cloned().collect();
+        if specs.is_empty() {
+            return;
+        }
+        specs.sort_by(|a, b| a.id.cmp(&b.id));
+        if let Ok(dir) = app.path().app_config_dir() {
+            let _ = fs::create_dir_all(&dir);
+            let _ = fs::write(
+                dir.join(LAST_SESSION_FILE),
+                serde_json::to_string_pretty(&specs).unwrap_or_default(),
+            );
+        }
+    }
+}
+
+/// Runs that were active when the app last closed or updated; reading them
+/// clears the list so the offer appears once.
+#[tauri::command]
+pub fn take_last_session(app: AppHandle) -> Vec<RunSpec> {
+    let Ok(dir) = app.path().app_config_dir() else {
+        return Vec::new();
+    };
+    let path = dir.join(LAST_SESSION_FILE);
+    let specs = fs::read_to_string(&path)
+        .ok()
+        .and_then(|text| serde_json::from_str(&text).ok())
+        .unwrap_or_default();
+    let _ = fs::remove_file(&path);
+    specs
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -483,6 +529,69 @@ fn walk_packages(dir: &Path, repo_root: &Path, depth: u32, configs: &mut Vec<Det
     }
 }
 
+#[derive(Serialize, Debug, PartialEq)]
+pub struct MissingDeps {
+    /// folder with a package.json and lockfile but no node_modules
+    pub cwd: String,
+    pub manager: &'static str,
+    pub command: &'static str,
+}
+
+/// The install command matching a folder's lockfile; no lockfile means we
+/// can't tell which package manager the project expects, so stay quiet.
+fn install_command(dir: &Path) -> Option<(&'static str, &'static str)> {
+    if dir.join("pnpm-lock.yaml").is_file() {
+        Some(("pnpm", "pnpm install"))
+    } else if dir.join("yarn.lock").is_file() {
+        Some(("yarn", "yarn install"))
+    } else if dir.join("bun.lockb").is_file() || dir.join("bun.lock").is_file() {
+        Some(("bun", "bun install"))
+    } else if dir.join("package-lock.json").is_file() {
+        Some(("npm", "npm install"))
+    } else {
+        None
+    }
+}
+
+fn find_missing_deps(dir: &Path, depth: u32, out: &mut Vec<MissingDeps>) {
+    if dir.join("package.json").is_file() && !dir.join("node_modules").is_dir() {
+        if let Some((manager, command)) = install_command(dir) {
+            out.push(MissingDeps {
+                cwd: dir.to_string_lossy().into_owned(),
+                manager,
+                command,
+            });
+        }
+    }
+    if depth == 0 {
+        return;
+    }
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let name = entry.file_name().to_string_lossy().to_string();
+        if !path.is_dir()
+            || name.starts_with('.')
+            || SKIP_DIRS.contains(&name.as_str())
+            || path.join(".git").exists()
+        {
+            continue;
+        }
+        find_missing_deps(&path, depth - 1, out);
+    }
+}
+
+/// JavaScript projects in the repo whose dependencies were never installed
+/// (fresh clone, or a project an agent just created).
+#[tauri::command]
+pub fn missing_dependencies(path: String) -> Vec<MissingDeps> {
+    let mut out = Vec::new();
+    find_missing_deps(Path::new(&path), 2, &mut out);
+    out
+}
+
 #[tauri::command]
 pub fn detect_run_configs(path: String) -> Result<Vec<DetectedConfig>, String> {
     let root = Path::new(&path);
@@ -639,6 +748,14 @@ pub fn start_run(
 
     let pid = child.id();
     state.running.lock().unwrap().insert(id.clone(), pid);
+    state.specs.lock().unwrap().insert(
+        id.clone(),
+        RunSpec {
+            id: id.clone(),
+            command: command.clone(),
+            cwd: cwd.clone(),
+        },
+    );
 
     // Clear agent output buffer for this session id
     if let Some(agent) = app.try_state::<Arc<super::agent::AgentState>>() {
@@ -661,6 +778,7 @@ pub fn start_run(
         let code = child.wait().ok().and_then(|s| s.code());
         if let Some(manager) = exit_app.try_state::<ProcessManager>() {
             manager.running.lock().unwrap().remove(&exit_id);
+            manager.specs.lock().unwrap().remove(&exit_id);
         }
         let _ = exit_app.emit("run-exit", ExitEvent { id: exit_id, code });
     });
@@ -708,6 +826,34 @@ fn kill_tree(pid: u32) -> Result<(), String> {
 #[tauri::command]
 pub fn list_running(state: State<'_, ProcessManager>) -> Vec<String> {
     state.running.lock().unwrap().keys().cloned().collect()
+}
+
+#[cfg(test)]
+mod deps_tests {
+    use super::missing_dependencies;
+    use std::fs;
+
+    #[test]
+    fn reports_lockfile_projects_without_node_modules() {
+        let root = std::env::temp_dir().join(format!("vide-deps-{}", fastrand::u64(..)));
+        // root: pnpm project, not installed
+        fs::create_dir_all(root.join("apps/web")).unwrap();
+        fs::write(root.join("package.json"), "{}").unwrap();
+        fs::write(root.join("pnpm-lock.yaml"), "").unwrap();
+        // apps/web: npm project, already installed
+        fs::write(root.join("apps/web/package.json"), "{}").unwrap();
+        fs::write(root.join("apps/web/package-lock.json"), "{}").unwrap();
+        fs::create_dir_all(root.join("apps/web/node_modules")).unwrap();
+        // apps/api: package.json without a lockfile -> unknown manager, ignored
+        fs::create_dir_all(root.join("apps/api")).unwrap();
+        fs::write(root.join("apps/api/package.json"), "{}").unwrap();
+
+        let found = missing_dependencies(root.to_string_lossy().into_owned());
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert_eq!(found[0].command, "pnpm install");
+        assert_eq!(std::path::Path::new(&found[0].cwd), root.as_path());
+        fs::remove_dir_all(root).ok();
+    }
 }
 
 #[cfg(test)]

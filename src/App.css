@@ -3203,3 +3203,43 @@ body.resizing-y {
 .line-code .hljs-strong {
   font-weight: 600;
 }
+
+/* ── smart run helpers ── */
+.deps-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 8px 8px 0;
+  padding: 7px 10px;
+  border: 1px solid rgba(251, 191, 36, 0.35);
+  background: rgba(251, 191, 36, 0.08);
+  border-radius: 8px;
+  font-size: 12px;
+  color: var(--text);
+}
+
+.deps-banner code {
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.deps-banner .mini-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+  font-family: var(--mono);
+}
+
+.mini-btn.open-url {
+  color: var(--cyan);
+  border-color: rgba(56, 189, 248, 0.4);
+  font-family: var(--mono);
+}
+
+.agent-notice-actions {
+  display: flex;
+  gap: 14px;
+  margin-top: 2px;
+}

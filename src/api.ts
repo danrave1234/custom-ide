@@ -204,3 +204,22 @@ export const listFiles = (root: string) => invoke<string[]>("list_files", { root
 
 /** Tell the backend this window's agent-ui listener is live (flushes queued agent actions). */
 export const agentUiReady = () => invoke<void>("agent_ui_ready");
+
+/** A JS project whose dependencies were never installed (lockfile but no node_modules). */
+export interface MissingDeps {
+  cwd: string;
+  manager: string;
+  command: string;
+}
+
+export const missingDependencies = (path: string) => invoke<MissingDeps[]>("missing_dependencies", { path });
+
+/** A run that was active when the app last closed or updated. */
+export interface LastRun {
+  id: string;
+  command: string;
+  cwd: string;
+}
+
+/** Runs active at last shutdown; reading clears them so the offer shows once. */
+export const takeLastSession = () => invoke<LastRun[]>("take_last_session");

@@ -4,6 +4,14 @@ All notable changes to Vide (formerly VibeDeck) will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **Open the app in one click**: when a run prints a local URL (`http://localhost:5173`), its toolbar shows an **Open** button.
+- **Install missing dependencies**: the Run tab notices a JS project with a lockfile but no `node_modules` and offers the matching `pnpm`/`yarn`/`bun`/`npm install`.
+- **Crash alerts**: a run that exits with an error on its own shows a notice with the real error line, **Restart** and **Show output**. Stopping or restarting a run never triggers it.
+- **Run from the command palette**: `Ctrl+K` lists **Run** for favorites and the selected repo's scripts, and **Stop** / **Restart** for running ones.
+- **Resume last session**: runs that were active when Vide closed (or updated) are offered once on the next launch.
+
 ### Changed
 
 - The Windows app is now fully named Vide: installer, Start menu and desktop shortcuts, Apps list entry and `Vide.exe`. Installing or updating replaces an existing VibeDeck install (no second copy) and keeps all settings. A taskbar pin to the old VibeDeck needs to be pinned again.

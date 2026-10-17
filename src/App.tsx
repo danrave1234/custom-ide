@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import * as api from "./api";
 import type {
   CustomConfig,
+  DetectedConfig,
   GroupItem,
   OutputLine,
   PersistedState,
@@ -24,6 +25,7 @@ import EnvView from "./components/EnvView";
 import BottomPanel, { type TerminalRequest } from "./components/BottomPanel";
 import Logo from "./components/Logo";
 import { containingRoot, pathKey } from "./codeLines";
+import { lastErrorLine } from "./runSmarts";
 import type { CodeRoot, OpenFileRequest } from "./components/CodeView";
 import KillPortModal from "./components/KillPortModal";
 import CommandPalette, { type CommandItem } from "./components/CommandPalette";
@@ -44,6 +46,7 @@ interface AgentNotice {
   message: string;
   level: "info" | "success" | "warning" | "error";
   repo?: string;
+  actions?: { label: string; run: () => void }[];
 }
 
 type Mode = "dashboard" | "code";
@@ -112,6 +115,28 @@ export default function App() {
     setNotices((prev) => prev.filter((n) => n.id !== id));
   }, []);
 
+  const pushNotice = useCallback(
+    (notice: Omit<AgentNotice, "id">) => {
+      const id = Date.now() + Math.random();
+      setNotices((prev) => [...prev.slice(-3), { ...notice, id }]);
+      // errors (and anything asking for a decision) stay until dismissed
+      if (notice.level !== "error" && !notice.actions?.length) setTimeout(() => dismissNotice(id), 8000);
+    },
+    [dismissNotice]
+  );
+  const [paletteConfigs, setPaletteConfigs] = useState<DetectedConfig[]>([]);
+  const [lastRuns, setLastRuns] = useState<api.LastRun[]>([]);
+  useEffect(() => {
+    // Reading clears the saved list, so a second call (React StrictMode runs
+    // this effect twice in dev) gets nothing: only a non-empty answer may set state.
+    api
+      .takeLastSession()
+      .then((runs) => {
+        if (runs.length) setLastRuns(runs);
+      })
+      .catch(() => {});
+  }, []);
+
   const toggleBottom = () => setBottomOpen((v) => !v);
 
   // Global navigation shortcuts
@@ -156,6 +181,9 @@ export default function App() {
   const sessionsRef = useRef(sessions);
   sessionsRef.current = sessions;
   const stoppedRunIds = useRef<Set<string>>(new Set());
+  /** runs being killed on purpose to restart; their exit is not a crash */
+  const restartingIds = useRef<Set<string>>(new Set());
+  const restartRunRef = useRef<(session: RunSession) => void>(() => {});
   const autoRestartingIds = useRef<Set<string>>(new Set());
 
   const showError = useCallback((msg: string) => {
@@ -259,8 +287,33 @@ export default function App() {
       }
     });
     const unlistenExit = listen<RunExitEvent>("run-exit", (event) => {
-      flushOutput(); // keep output ordered before the exit marker
       const { id, code } = event.payload;
+      const crashed =
+        code !== null && code !== 0 && !stoppedRunIds.current.has(id) && !restartingIds.current.has(id);
+      const session = sessionsRef.current.find((s) => s.id === id);
+      if (crashed && session) {
+        const tail = [...session.lines, ...(pendingOutput.current.get(id) ?? [])];
+        pushNotice({
+          title: `${session.name} stopped (exit ${code})`,
+          message: lastErrorLine(tail) ?? "The process exited with an error.",
+          level: "error",
+          actions: [
+            { label: "Restart", run: () => restartRunRef.current(session) },
+            {
+              label: "Show output",
+              run: () => {
+                setSelectedRepo(session.repoPath);
+                setView("repo");
+                setTab("run");
+                setActiveSessionId(id);
+                setModeState("dashboard");
+                localStorage.setItem("vd-mode", "dashboard");
+              },
+            },
+          ],
+        });
+      }
+      flushOutput(); // keep output ordered before the exit marker
       // a finished process may have changed branch/dirty state — refresh that repo
       const repoPath = id.split("::")[0];
       api
@@ -288,7 +341,7 @@ export default function App() {
       unlistenExit.then((fn) => fn());
       if (flushTimer.current !== null) window.clearTimeout(flushTimer.current);
     };
-  }, [flushOutput]);
+  }, [flushOutput, pushNotice]);
 
   const refreshSelectedRepo = useCallback(async () => {
     if (!selectedRepo) return;
@@ -388,6 +441,7 @@ export default function App() {
     async (session: RunSession, automatic = false) => {
       const current = sessionsRef.current.find((s) => s.id === session.id);
       if (current?.status === "running") {
+        restartingIds.current.add(session.id);
         try {
           await api.stopRun(session.id);
         } catch {
@@ -399,6 +453,7 @@ export default function App() {
           await new Promise((r) => setTimeout(r, 150));
         }
       }
+      restartingIds.current.delete(session.id);
       if (automatic && stoppedRunIds.current.has(session.id)) return;
       await startRun(
         session.repoPath,
@@ -410,6 +465,7 @@ export default function App() {
     },
     [startRun]
   );
+  restartRunRef.current = restartRun;
 
   // Auto-restart on file change
   useEffect(() => {
@@ -484,16 +540,12 @@ export default function App() {
           break;
         }
         case "notify": {
-          const notice: AgentNotice = {
-            id: Date.now() + Math.random(),
+          pushNotice({
             title: payload.title ?? "Agent",
             message: payload.message ?? "",
             level: payload.level ?? "info",
             repo: payload.repo ?? undefined,
-          };
-          setNotices((prev) => [...prev.slice(-3), notice]);
-          // errors stay until dismissed; everything else fades out
-          if (notice.level !== "error") setTimeout(() => dismissNotice(notice.id), 8000);
+          });
           break;
         }
         case "stopRun": {
@@ -559,6 +611,33 @@ export default function App() {
       return prev.filter((s) => s.id !== id);
     });
   }, []);
+
+  useEffect(() => {
+    if (!lastRuns.length || !repos.length) return;
+    const resumable = lastRuns
+      .map((r) => ({ ...r, repoPath: r.id.split("::")[0], name: r.id.split("::").slice(1).join("::") }))
+      .filter((r) => repos.some((repo) => pathKey(repo.path) === pathKey(r.repoPath)));
+    setLastRuns([]);
+    if (!resumable.length) return;
+    pushNotice({
+      title: "Resume last session?",
+      message: `${resumable.map((r) => r.name).join(", ")} ${resumable.length === 1 ? "was" : "were"} running when Vide closed.`,
+      level: "info",
+      actions: [
+        {
+          label: `Run ${resumable.length === 1 ? "it" : `all ${resumable.length}`}`,
+          run: () =>
+            resumable.forEach((r, i) => setTimeout(() => void startRun(r.repoPath, r.name, r.command, r.cwd), i * 400)),
+        },
+      ],
+    });
+  }, [lastRuns, repos, pushNotice, startRun]);
+
+  // run configs of the selected repo, for the command palette's "Run …" entries
+  useEffect(() => {
+    if (!paletteOpen || !selectedRepo) return;
+    api.detectRunConfigs(selectedRepo).then(setPaletteConfigs).catch(() => setPaletteConfigs([]));
+  }, [paletteOpen, selectedRepo]);
 
   const customConfigs = (selectedRepo && persisted?.customConfigs[selectedRepo]) || [];
   const pinnedConfigs = (selectedRepo && persisted?.pinnedConfigs[selectedRepo]) || [];
@@ -796,6 +875,53 @@ export default function App() {
             action: () => openTerminal(cwd, `${agent.name} · ${label}`, agent.command),
           };
         }),
+        ...sessions
+          .filter((x) => x.status === "running")
+          .flatMap((x) => [
+            {
+              id: `stop-${x.id}`,
+              label: `Stop ${x.name}`,
+              detail: repos.find((r) => r.path === x.repoPath)?.name ?? x.repoPath,
+              group: "Run",
+              keywords: "kill end process",
+              action: () => stopRun(x.id),
+            },
+            {
+              id: `restart-${x.id}`,
+              label: `Restart ${x.name}`,
+              detail: repos.find((r) => r.path === x.repoPath)?.name ?? x.repoPath,
+              group: "Run",
+              keywords: "reload rerun",
+              action: () => void restartRun(x),
+            },
+          ]),
+        ...(() => {
+          // favorites from every repo, then the selected repo's detected configs
+          const running = new Set(sessions.filter((x) => x.status === "running").map((x) => x.id));
+          const seen = new Set<string>();
+          const entries: { repoPath: string; name: string; command: string; cwd: string }[] = [];
+          for (const [repoPath, list] of Object.entries(projectPinned)) {
+            for (const c of list) entries.push({ repoPath, ...c });
+          }
+          if (selectedRepo) {
+            for (const c of [...customConfigs, ...paletteConfigs]) entries.push({ repoPath: selectedRepo, ...c });
+          }
+          return entries
+            .filter((e) => {
+              const id = `${e.repoPath}::${e.name}`;
+              if (running.has(id) || seen.has(id)) return false;
+              seen.add(id);
+              return true;
+            })
+            .map((e) => ({
+              id: `run-${e.repoPath}::${e.name}`,
+              label: `Run ${e.name}`,
+              detail: `${repos.find((r) => r.path === e.repoPath)?.name ?? e.repoPath} · ${e.command}`,
+              group: "Run",
+              keywords: "start launch script dev",
+              action: () => void startRun(e.repoPath, e.name, e.command, e.cwd),
+            }));
+        })(),
         {
           id: "mode-toggle",
           label: mode === "code" ? "Switch to Dashboard" : "Switch to Code view",
@@ -1000,6 +1126,22 @@ export default function App() {
               <div className="agent-notice-body">
                 <strong>{n.title}</strong>
                 <span>{n.message}</span>
+                {n.actions && n.actions.length > 0 && (
+                  <span className="agent-notice-actions">
+                    {n.actions.map((a) => (
+                      <button
+                        key={a.label}
+                        className="link-btn"
+                        onClick={() => {
+                          a.run();
+                          dismissNotice(n.id);
+                        }}
+                      >
+                        {a.label}
+                      </button>
+                    ))}
+                  </span>
+                )}
                 {(() => {
                   // hooks report their cwd, which may be a subfolder or use other separators
                   const repoPath = n.repo ? containingRoot(repos.map((r) => r.path), n.repo) : null;
