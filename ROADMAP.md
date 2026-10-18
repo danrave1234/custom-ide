@@ -4,13 +4,13 @@ A prioritized list of improvements, not a promise of dates. Vide should stay lig
 
 ## Done
 
-These items from earlier versions of this roadmap are finished ("next release" means merged to `main` but not yet released):
+These items from earlier versions of this roadmap are finished:
 
 - **Signed in-app updates** (0.5.0): one check per launch, verified with the updater key.
-- **Command palette** (0.2.0): repos, views and actions; agent launch in 1.0.0; run, stop and restart in the next release.
+- **Command palette** (0.2.0): repos, views and actions; agent launch in 1.0.0; run, stop and restart in 1.1.0.
 - **Smaller startup bundle** (1.0.0): the Code view and its syntax highlighter load only when first opened.
 - **Sandboxed file reads** (1.0.0): the Code view rejects paths outside the browsed folder, with traversal tests.
-- **Crash notifications** (next release): a run that dies on its own shows the error with a Restart action.
+- **Crash notifications** (1.1.0): a run that dies on its own shows the error with a Restart action.
 
 ## P0: distribution and safety
 
