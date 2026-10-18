@@ -189,6 +189,9 @@ export default function App() {
   const showError = useCallback((msg: string) => {
     setError(msg);
   }, []);
+  // Stable on purpose: the git and env views reload (and reset the selected
+  // diff, commit message and edits) whenever this callback's identity changes.
+  const clearError = useCallback(() => setError(null), []);
 
   const persist = useCallback(
     (next: PersistedState) => {
@@ -1297,7 +1300,7 @@ export default function App() {
                   <ChangesView
                     repoPath={selectedRepo}
                     onError={showError}
-                    onSuccess={() => setError(null)}
+                    onSuccess={clearError}
                     onRepoChanged={refreshSelectedRepo}
                     onOpenFile={showFile}
                   />
@@ -1306,12 +1309,12 @@ export default function App() {
                   <BranchesView
                     repoPath={selectedRepo}
                     onError={showError}
-                    onSuccess={() => setError(null)}
+                    onSuccess={clearError}
                     onRepoChanged={refreshSelectedRepo}
                   />
                 )}
-                {tab === "history" && <HistoryView repoPath={selectedRepo} onError={showError} onSuccess={() => setError(null)} />}
-                {tab === "env" && <EnvView repoPath={selectedRepo} onError={showError} onSuccess={() => setError(null)} />}
+                {tab === "history" && <HistoryView repoPath={selectedRepo} onError={showError} onSuccess={clearError} />}
+                {tab === "env" && <EnvView repoPath={selectedRepo} onError={showError} onSuccess={clearError} />}
                 {tab === "run" && (
                   <RunView
                     repoPath={selectedRepo}

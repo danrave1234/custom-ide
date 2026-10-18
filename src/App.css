@@ -1986,6 +1986,8 @@ body.resizing {
 }
 
 .config-info {
+  /* fill the row so names line up instead of floating between the pin and action buttons */
+  flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;

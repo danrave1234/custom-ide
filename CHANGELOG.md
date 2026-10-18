@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- The Changes tab no longer clears the selected diff and your commit message whenever something else updates (a notification, run output); Branches, History and Env no longer reload on every update either.
+- Run configs line up in the Run tab and Favorites instead of shifting with each name's length.
+
 ## [1.1.0] - 2026-10-18
 
 ### Added
