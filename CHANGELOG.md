@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-10-19
+
 ### Fixed
 
 - The Changes tab no longer clears the selected diff and your commit message whenever something else updates (a notification, run output); Branches, History and Env no longer reload on every update either.
@@ -124,7 +126,8 @@ Version bump only. The features originally listed for this release were not incl
 
 - Production package metadata now uses the VibeDeck product name and description.
 
-[Unreleased]: https://github.com/danrave1234/custom-ide/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/danrave1234/custom-ide/compare/v1.1.1...HEAD
+[1.1.1]: https://github.com/danrave1234/custom-ide/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/danrave1234/custom-ide/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/danrave1234/custom-ide/compare/v0.5.0...v1.0.0
 [0.5.0]: https://github.com/danrave1234/custom-ide/compare/v0.4.0...v0.5.0
